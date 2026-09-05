@@ -49,6 +49,16 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
+
+            // Do NOT stamp the git commit into the APK.
+            //
+            // By default AGP writes META-INF/version-control-info.textproto containing
+            // the current commit SHA. That makes the APK depend on git state rather
+            // than on source, and it breaks verification in a way that looks alarming:
+            // anyone building from a source tarball, a shallow clone, or an exported
+            // archive has no git metadata and gets a different hash — reporting "does
+            // not reproduce" when the code is in fact identical.
+            vcsInfo { include = false }
             // Off for the same reason the upstream app keeps it off during beta —
             // but here it also removes a whole class of build nondeterminism, which
             // matters more than the ~1 MB it would save on an app this small.

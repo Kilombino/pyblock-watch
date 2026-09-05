@@ -52,15 +52,26 @@ A keystore is only needed to *sign*. The unsigned APK is what you compare.
 
 ## 5. Verified result
 
-Version **0.1.0** (versionCode 1), commit `e33925a`:
+Version **0.1.0** (versionCode 1):
 
 ```
 app-release-unsigned.apk
-SHA-256  ea26040f0bd64a30f839c120f5f29519d6135e23395b9f33b6d032ca646a9b85
+SHA-256  9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f
 ```
 
-Two independent clean builds, from two separate fresh clones, produced that identical
-hash — the build is deterministic.
+Verified three ways, all producing that identical hash:
+
+- two independent clean builds from two separate fresh clones;
+- a clone sitting on a **different commit**;
+- a **source tarball with no `.git` directory at all**.
+
+That last case is the one that matters and the reason for the `vcsInfo` line in
+`app/build.gradle.kts`. By default AGP writes `META-INF/version-control-info.textproto`
+into the APK containing the current git commit SHA, which makes the output depend on
+git state rather than on source. Anyone verifying from a tarball, a shallow clone or
+an exported archive would then get a different hash and reasonably report "does not
+reproduce" — for a wallet, a false alarm of that kind is expensive. With the stamp
+disabled, the APK is a function of the source alone.
 
 ## 6. Comparing against a signed release
 
