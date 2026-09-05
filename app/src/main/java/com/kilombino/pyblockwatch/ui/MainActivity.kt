@@ -60,6 +60,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kilombino.pyblockwatch.chain.Chain
 import com.kilombino.pyblockwatch.crypto.ScriptType
 import com.kilombino.pyblockwatch.data.AddressRow
+import com.kilombino.pyblockwatch.data.TxConf
 import com.kilombino.pyblockwatch.data.WatchService
 
 class MainActivity : ComponentActivity() {
@@ -235,6 +236,8 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         BalanceCard(chain, cs, accent, state.scriptType)
 
         ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
+
+        if (cs.transactions.isNotEmpty()) MovementsCard(cs.transactions, accent)
 
         if (cs.fingerprintChanged) {
             Panel(accent = Bad) {
@@ -478,6 +481,22 @@ private fun SettingsPanel(
         DerivationSelector(state.scriptType, accent) { vm.setScriptType(it) }
 
         Spacer(Modifier.height(14.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Límite de hueco (gap): ${state.gapLimit}",
+                     style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                Explain("Cuántas direcciones vacías seguidas se revisan antes de parar. " +
+                    "Súbelo si usas muchas direcciones; bájalo para escanear más rápido.")
+            }
+            TextButton(onClick = { vm.setGapLimit(state.gapLimit - 5) }) {
+                Text("−5", color = accent, style = MaterialTheme.typography.bodyMedium)
+            }
+            TextButton(onClick = { vm.setGapLimit(state.gapLimit + 5) }) {
+                Text("+5", color = accent, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
         if (chain.allowsCustomNode) {
             Text("Tu propio nodo ${chain.display}",
                  style = MaterialTheme.typography.bodyMedium, color = TextMain)
@@ -537,6 +556,40 @@ private fun DerivationSelector(current: ScriptType?, accent: Color, onSelect: (S
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MovementsCard(txs: List<TxConf>, accent: Color) {
+    Panel(accent = accent) {
+        SectionLabel("movimientos · confirmaciones", accent)
+        Spacer(Modifier.height(8.dp))
+        txs.take(15).forEach { t ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${t.txid.take(8)}…${t.txid.takeLast(6)}",
+                    style = MaterialTheme.typography.bodySmall, color = TextSoft,
+                    modifier = Modifier.weight(1f),
+                )
+                if (t.pending) {
+                    Text("en mempool · 0 conf",
+                         style = MaterialTheme.typography.bodySmall, color = Warn)
+                } else {
+                    Text(
+                        "${t.confirmations} conf" + if (t.confirmations >= 6) "  ✓" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (t.confirmations >= 6) Good else TextSoft,
+                    )
+                }
+            }
+        }
+        if (txs.size > 15) {
+            Text("… y ${txs.size - 15} más",
+                 style = MaterialTheme.typography.bodySmall, color = TextFaint)
         }
     }
 }

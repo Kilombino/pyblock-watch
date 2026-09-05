@@ -40,9 +40,12 @@ sealed interface ScanEvent {
     data class Deriving(val chainIndex: Int, val index: Int, val path: String) : ScanEvent
     data class Found(val row: AddressRow) : ScanEvent
     data class GapProgress(val chainIndex: Int, val consecutiveEmpty: Int, val gapLimit: Int) : ScanEvent
-    data class Done(val rows: List<AddressRow>, val height: Int) : ScanEvent
+    data class Done(val rows: List<AddressRow>, val height: Int, val txs: List<TxConf>) : ScanEvent
     data class Failed(val message: String) : ScanEvent
 }
+
+/** A wallet transaction and how deep it is: pending (in the mempool) or N confirmations. */
+data class TxConf(val txid: String, val confirmations: Int, val pending: Boolean)
 
 /**
  * Walks an xpub the way every wallet does: derive `chain/index`, ask the server
@@ -64,8 +67,10 @@ class Scanner(
         endpoint: NodeEndpoint,
         pinnedFingerprint: String?,
         scriptType: ScriptType,
+        gap: Int = gapLimit,
     ): Flow<ScanEvent> = flow {
         val purpose = purposeFor(scriptType)
+        val txHeights = HashMap<String, Int>()
         val parsed = try {
             Bip32.parseExtendedPubKey(xpub)
         } catch (e: IllegalArgumentException) {
@@ -94,7 +99,7 @@ class Scanner(
                 val branch = Bip32.deriveChild(parsed, chainIndex)
                 var index = 0
                 var consecutiveEmpty = 0
-                while (consecutiveEmpty < gapLimit) {
+                while (consecutiveEmpty < gap) {
                     val path = "m/$purpose'/0'/0'/$chainIndex/$index"
                     emit(ScanEvent.Deriving(chainIndex, index, path))
 
@@ -104,9 +109,9 @@ class Scanner(
 
                     // History first, balance only when there IS history. Most addresses
                     // in a scan are unused, and asking for a balance we already know is
-                    // zero doubles the round trips on the common path — with a gap limit
-                    // of 20 per branch that is 80 wasted requests over a slow TLS link.
-                    val txs = client.historyCount(scriptHash)
+                    // zero doubles the round trips on the common path.
+                    val hist = client.history(scriptHash)
+                    val txs = hist.size
                     val bal = if (txs > 0) client.balance(scriptHash) else ScriptHashBalance(0, 0)
 
                     val row = AddressRow(
@@ -116,16 +121,21 @@ class Scanner(
                     )
                     if (row.isUsed) {
                         rows += row
+                        hist.forEach { txHeights[it.txid] = it.height }
                         consecutiveEmpty = 0
                         emit(ScanEvent.Found(row))
                     } else {
                         consecutiveEmpty++
-                        emit(ScanEvent.GapProgress(chainIndex, consecutiveEmpty, gapLimit))
+                        emit(ScanEvent.GapProgress(chainIndex, consecutiveEmpty, gap))
                     }
                     index++
                 }
             }
-            emit(ScanEvent.Done(rows, height))
+            // Confirmations from the tip: height <= 0 is still in the mempool (0 conf).
+            val txs = txHeights.map { (id, h) ->
+                TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0)
+            }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
+            emit(ScanEvent.Done(rows, height, txs))
         } catch (e: Exception) {
             emit(ScanEvent.Failed(e.message ?: "Fallo durante el escaneo"))
         } finally {
@@ -133,14 +143,23 @@ class Scanner(
         }
     }.flowOn(dispatcher)
 
-    /** Cheap refresh of already-discovered addresses, for the notification service. */
-    suspend fun refreshTotal(
+    /**
+     * Cheap refresh of already-discovered addresses for the notification service.
+     * Returns confirmed and unconfirmed apart so the watcher can distinguish a mempool
+     * arrival, a confirmation and a spend.
+     */
+    suspend fun refreshBalance(
         rows: List<AddressRow>, endpoint: NodeEndpoint, pinnedFingerprint: String?,
-    ): Long {
+    ): ScriptHashBalance {
         val client = ElectrumClient(endpoint, pinnedFingerprint)
         return try {
             client.connect()
-            rows.sumOf { client.balance(it.scriptHash).total }
+            var confirmed = 0L; var unconfirmed = 0L
+            for (r in rows) {
+                val b = client.balance(r.scriptHash)
+                confirmed += b.confirmed; unconfirmed += b.unconfirmed
+            }
+            ScriptHashBalance(confirmed, unconfirmed)
         } finally {
             client.close()
         }

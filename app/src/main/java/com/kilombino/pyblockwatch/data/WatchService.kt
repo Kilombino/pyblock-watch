@@ -63,11 +63,14 @@ class WatchService : Service() {
                     val rows = deriveKnownAddresses(xpub, chain, store)
                     if (rows.isEmpty()) return@runCatching
                     val endpoint = store.endpoint(chain)
-                    val total = scanner.refreshTotal(rows, endpoint, store.pinnedFingerprint(endpoint))
-                    val previous = store.lastTotal(chain)
-                    store.setLastTotal(chain, total)
-                    // -1 means "never scanned", so the first observation is not a change.
-                    if (previous >= 0 && total != previous) notifyChange(chain, previous, total)
+                    val bal = scanner.refreshBalance(rows, endpoint, store.pinnedFingerprint(endpoint))
+                    val prevConf = store.lastConfirmed(chain)
+                    val prevUnconf = store.lastUnconfirmed(chain)
+                    store.setLastBalance(chain, bal.confirmed, bal.unconfirmed)
+                    // prevConf == -1 means "never scanned", so the first observation is not a change.
+                    if (prevConf >= 0 && (bal.confirmed != prevConf || bal.unconfirmed != prevUnconf)) {
+                        notifyChange(chain, prevConf, prevUnconf, bal.confirmed, bal.unconfirmed)
+                    }
                 }
             }
             delay(INTERVAL_MS)
@@ -82,10 +85,11 @@ class WatchService : Service() {
     private fun deriveKnownAddresses(xpub: String, chain: Chain, store: Store): List<AddressRow> {
         val account = runCatching { Bip32.parseExtendedPubKey(xpub) }.getOrNull() ?: return emptyList()
         val type = store.scriptType
+        val depth = store.gapLimit
         val out = mutableListOf<AddressRow>()
         for (chainIndex in 0..1) {
             val branch = Bip32.deriveChild(account, chainIndex)
-            for (i in 0 until WATCH_DEPTH) {
+            for (i in 0 until depth) {
                 val child = Bip32.deriveChild(branch, i)
                 val sh = Address.scriptHashFor(child.pubkey(), type)
                 out += AddressRow(
@@ -98,14 +102,29 @@ class WatchService : Service() {
         return out
     }
 
-    private fun notifyChange(chain: Chain, before: Long, after: Long) {
-        val delta = after - before
-        val sign = if (delta > 0) "+" else "−"
-        val amount = "%.8f".format(delta.absoluteValue / 100_000_000f)
+    private fun notifyChange(
+        chain: Chain, prevConf: Long, prevUnconf: Long, newConf: Long, newUnconf: Long,
+    ) {
+        fun btc(sats: Long) = "%.8f".format(sats.absoluteValue / 100_000_000f)
+        val prevTotal = prevConf + prevUnconf
+        val newTotal = newConf + newUnconf
+        val delta = newTotal - prevTotal
+        val (title, text) = when {
+            delta > 0 && newUnconf > prevUnconf ->
+                "Recibiendo +${btc(delta)} ₿" to "En la mempool · 0 confirmaciones (aún no confirmado)"
+            delta > 0 ->
+                "Recibido +${btc(delta)} ₿" to "Confirmado · saldo ${btc(newTotal)} ₿"
+            delta < 0 && newUnconf != 0L ->
+                "Enviando −${btc(delta)} ₿" to "En la mempool · 0 confirmaciones"
+            delta < 0 ->
+                "Enviado −${btc(delta)} ₿" to "Confirmado · saldo ${btc(newTotal)} ₿"
+            else -> // total unchanged but a pending tx moved: it just confirmed
+                "Confirmado" to "${btc(newConf - prevConf)} ₿ ya tienen confirmaciones"
+        }
         val n = Notification.Builder(this, CHANNEL_ALERTS)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("${chain.display}: $sign$amount ₿")
-            .setContentText("Nuevo saldo: %.8f ₿".format(after / 100_000_000f))
+            .setContentTitle("${chain.display}: $title")
+            .setContentText(text)
             .setAutoCancel(true)
             .setContentIntent(openApp())
             .build()

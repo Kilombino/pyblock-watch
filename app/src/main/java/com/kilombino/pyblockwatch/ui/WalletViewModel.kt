@@ -10,6 +10,7 @@ import com.kilombino.pyblockwatch.data.AddressRow
 import com.kilombino.pyblockwatch.data.ScanEvent
 import com.kilombino.pyblockwatch.data.Scanner
 import com.kilombino.pyblockwatch.data.Store
+import com.kilombino.pyblockwatch.data.TxConf
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,7 @@ data class ChainState(
     val fingerprint: String? = null,
     val fingerprintChanged: Boolean = false,
     val endpoint: NodeEndpoint? = null,
+    val transactions: List<TxConf> = emptyList(),
 ) {
     val confirmed: Long get() = rows.sumOf { it.confirmed }
     val unconfirmed: Long get() = rows.sumOf { it.unconfirmed }
@@ -48,6 +50,7 @@ data class UiState(
     val selected: Chain = Chain.BLAKE2B,
     val chains: Map<Chain, ChainState> = Chain.entries.associateWith { ChainState() },
     val notificationsEnabled: Boolean = false,
+    val gapLimit: Int = 20,
     val inputError: String? = null,
 ) {
     val current: ChainState get() = chains[selected] ?: ChainState()
@@ -72,6 +75,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 scriptType = store.scriptType,
                 selected = store.lastChain,
                 notificationsEnabled = store.notificationsEnabled,
+                gapLimit = store.gapLimit,
             )
         }
         if (xpub != null) Chain.entries.forEach { scan(it) }
@@ -105,6 +109,17 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         Chain.entries.forEach { scan(it) }
+    }
+
+    /** Change the gap limit (how deep the scan looks) and re-scan both chains. */
+    fun setGapLimit(limit: Int) {
+        val clamped = limit.coerceIn(5, 100)
+        if (clamped == store.gapLimit) return
+        store.gapLimit = clamped
+        _state.update {
+            it.copy(gapLimit = clamped, chains = Chain.entries.associateWith { ChainState() })
+        }
+        if (!_state.value.xpub.isNullOrBlank()) Chain.entries.forEach { scan(it) }
     }
 
     /** Change the address type (BIP-84/49/44/86) and re-scan both chains. */
@@ -162,7 +177,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
         jobs[chain] = viewModelScope.launch {
             val found = mutableListOf<AddressRow>()
-            scanner.scan(xpub, chain, endpoint, pin, store.scriptType).collect { ev ->
+            scanner.scan(xpub, chain, endpoint, pin, store.scriptType, store.gapLimit).collect { ev ->
                 update(chain) { st ->
                     when (ev) {
                         is ScanEvent.Connecting ->
@@ -185,8 +200,17 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             st.copy(rows = found.toList())
                         }
                         is ScanEvent.Done -> {
-                            store.setLastTotal(chain, ev.rows.sumOf { it.total })
-                            st.copy(phase = ScanPhase.Complete, rows = ev.rows, height = ev.height)
+                            // Reset the notification baseline to what the user is now looking at,
+                            // so the watcher only fires on genuinely new movement.
+                            store.setLastBalance(
+                                chain,
+                                ev.rows.sumOf { it.confirmed },
+                                ev.rows.sumOf { it.unconfirmed },
+                            )
+                            st.copy(
+                                phase = ScanPhase.Complete, rows = ev.rows,
+                                height = ev.height, transactions = ev.txs,
+                            )
                         }
                         is ScanEvent.Failed -> st.copy(phase = ScanPhase.Error(ev.message))
                     }

@@ -180,6 +180,19 @@ class ElectrumClient(
         return ScriptHashBalance(r.optLong("confirmed"), r.optLong("unconfirmed"))
     }
 
+    /** One entry of an address's on-chain history. height <= 0 means still in the mempool. */
+    data class HistoryItem(val txid: String, val height: Int)
+
+    /** Full history touching this scripthash — tx ids and their block heights (0 = mempool). */
+    fun history(scriptHash: String): List<HistoryItem> {
+        val r = call("blockchain.scripthash.get_history", JSONArray().put(scriptHash)) as? JSONArray
+            ?: return emptyList()
+        return (0 until r.length()).map {
+            val o = r.getJSONObject(it)
+            HistoryItem(o.optString("tx_hash"), o.optInt("height"))
+        }
+    }
+
     /** Number of transactions touching this scripthash — how we detect a used address. */
     fun historyCount(scriptHash: String): Int {
         val r = call("blockchain.scripthash.get_history", JSONArray().put(scriptHash)) as? JSONArray

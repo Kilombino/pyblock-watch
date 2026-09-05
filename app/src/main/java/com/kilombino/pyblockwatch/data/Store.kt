@@ -73,6 +73,19 @@ class Store(context: Context) {
         prefs.edit().putLong(keyTotal(chain), sats).apply()
     }
 
+    // Confirmed and unconfirmed tracked apart so the watcher can tell "arrived in the
+    // mempool" from "just confirmed" from "sent", and word the notification accordingly.
+    fun lastConfirmed(chain: Chain): Long = prefs.getLong(keyConf(chain), -1L)
+    fun lastUnconfirmed(chain: Chain): Long = prefs.getLong(keyUnconf(chain), 0L)
+    fun setLastBalance(chain: Chain, confirmed: Long, unconfirmed: Long) {
+        prefs.edit().putLong(keyConf(chain), confirmed).putLong(keyUnconf(chain), unconfirmed).apply()
+    }
+
+    /** How many consecutive empty addresses end a branch scan. Configurable; sane bounds. */
+    var gapLimit: Int
+        get() = prefs.getInt(KEY_GAP, 20).coerceIn(5, 100)
+        set(v) = prefs.edit().putInt(KEY_GAP, v.coerceIn(5, 100)).apply()
+
     // On by default: the whole point is to be told when coins arrive without opening the app.
     var notificationsEnabled: Boolean
         get() = prefs.getBoolean(KEY_NOTIFY, true)
@@ -101,9 +114,12 @@ class Store(context: Context) {
         const val KEY_CHAIN = "chain"
         const val KEY_NOTIFY = "notify"
         const val KEY_SCRIPT = "scripttype"
+        const val KEY_GAP = "gaplimit"
         fun keyHost(c: Chain) = "host_${c.id}"
         fun keyPort(c: Chain) = "port_${c.id}"
         fun keyTotal(c: Chain) = "total_${c.id}"
+        fun keyConf(c: Chain) = "conf_${c.id}"
+        fun keyUnconf(c: Chain) = "unconf_${c.id}"
         fun keyPin(e: NodeEndpoint) = "pin_${e.host}_${e.port}"
     }
 }
