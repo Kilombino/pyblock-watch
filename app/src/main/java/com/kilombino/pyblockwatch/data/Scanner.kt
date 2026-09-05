@@ -165,6 +165,34 @@ class Scanner(
         }
     }
 
+    /**
+     * Silent refresh of the addresses a scan already found: re-query balance and history
+     * for each known scripthash and recompute confirmations against the tip. No gap walk,
+     * so it's cheap enough to run on a foreground timer without flickering the UI.
+     */
+    suspend fun refreshDetails(
+        rows: List<AddressRow>, endpoint: NodeEndpoint, pinnedFingerprint: String?,
+    ): Triple<List<AddressRow>, List<TxConf>, Int> {
+        val client = ElectrumClient(endpoint, pinnedFingerprint)
+        return try {
+            client.connect()
+            val tip = client.blockHeight()
+            val txHeights = HashMap<String, Int>()
+            val updated = rows.map { r ->
+                val hist = client.history(r.scriptHash)
+                hist.forEach { txHeights[it.txid] = it.height }
+                val bal = client.balance(r.scriptHash)
+                r.copy(confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = hist.size)
+            }
+            val txs = txHeights.map { (id, h) ->
+                TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0)
+            }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
+            Triple(updated, txs, tip)
+        } finally {
+            client.close()
+        }
+    }
+
     companion object {
         /** The script type the xpub prefix implies (SLIP-132), or null for a plain xpub. */
         fun scriptTypeOf(xpub: String): ScriptType? =

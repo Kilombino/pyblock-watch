@@ -12,6 +12,7 @@ import com.kilombino.pyblockwatch.data.Scanner
 import com.kilombino.pyblockwatch.data.Store
 import com.kilombino.pyblockwatch.data.TxConf
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,6 +63,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
     private val scanner = Scanner()
     private val jobs = mutableMapOf<Chain, Job>()
+    private var refreshJob: Job? = null
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -79,6 +81,37 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         if (xpub != null) Chain.entries.forEach { scan(it) }
+        startRefreshLoop()
+    }
+
+    /** While the app is open, quietly refresh the SELECTED chain's balance every 30 s. */
+    private fun startRefreshLoop() {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            while (true) {
+                delay(30_000)
+                if (!_state.value.xpub.isNullOrBlank()) refresh(_state.value.selected)
+            }
+        }
+    }
+
+    /**
+     * Silent balance refresh of the addresses already found for [chain] — no gap walk,
+     * no "scanning" flicker. Falls back to a full scan if nothing has been found yet.
+     */
+    fun refresh(chain: Chain) {
+        val xpub = _state.value.xpub ?: return
+        val cs = _state.value.chains[chain] ?: return
+        if (cs.rows.isEmpty() || cs.phase !is ScanPhase.Complete) { scan(chain); return }
+        viewModelScope.launch {
+            runCatching {
+                val endpoint = store.endpoint(chain)
+                val pin = store.pinnedFingerprint(endpoint)
+                val (rows, txs, tip) = scanner.refreshDetails(cs.rows, endpoint, pin)
+                store.setLastBalance(chain, rows.sumOf { it.confirmed }, rows.sumOf { it.unconfirmed })
+                update(chain) { it.copy(rows = rows, transactions = txs, height = tip) }
+            }
+        }
     }
 
     /** Validate and store a pasted extended public key, then scan both chains. */
@@ -137,6 +170,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     fun select(chain: Chain) {
         store.lastChain = chain
         _state.update { it.copy(selected = chain) }
+        refresh(chain)          // fresh figures the moment you switch to a chain
+        startRefreshLoop()      // restart the timer so it tracks the newly selected chain
     }
 
     fun forget() {
