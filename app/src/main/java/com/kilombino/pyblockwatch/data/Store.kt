@@ -3,6 +3,7 @@ package com.kilombino.pyblockwatch.data
 import android.content.Context
 import com.kilombino.pyblockwatch.chain.Chain
 import com.kilombino.pyblockwatch.chain.NodeEndpoint
+import com.kilombino.pyblockwatch.crypto.ScriptType
 
 /**
  * Everything this app remembers.
@@ -72,9 +73,20 @@ class Store(context: Context) {
         prefs.edit().putLong(keyTotal(chain), sats).apply()
     }
 
+    // On by default: the whole point is to be told when coins arrive without opening the app.
     var notificationsEnabled: Boolean
-        get() = prefs.getBoolean(KEY_NOTIFY, false)
+        get() = prefs.getBoolean(KEY_NOTIFY, true)
         set(v) = prefs.edit().putBoolean(KEY_NOTIFY, v).apply()
+
+    /**
+     * Which address type to derive from the xpub. Defaults to native SegWit (BIP-84,
+     * m/84'/0'/0', bc1q); the user can switch to Nested (BIP-49), Legacy (BIP-44) or
+     * Taproot (BIP-86). Independent of the xpub prefix, so a plain `xpub` still works.
+     */
+    var scriptType: ScriptType
+        get() = prefs.getString(KEY_SCRIPT, null)
+            ?.let { runCatching { ScriptType.valueOf(it) }.getOrNull() } ?: ScriptType.P2WPKH
+        set(v) = prefs.edit().putString(KEY_SCRIPT, v.name).apply()
 
     fun clearWallet() {
         prefs.edit().apply {
@@ -88,6 +100,7 @@ class Store(context: Context) {
         const val KEY_LABEL = "label"
         const val KEY_CHAIN = "chain"
         const val KEY_NOTIFY = "notify"
+        const val KEY_SCRIPT = "scripttype"
         fun keyHost(c: Chain) = "host_${c.id}"
         fun keyPort(c: Chain) = "port_${c.id}"
         fun keyTotal(c: Chain) = "total_${c.id}"

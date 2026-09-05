@@ -81,15 +81,16 @@ class WatchService : Service() {
      */
     private fun deriveKnownAddresses(xpub: String, chain: Chain, store: Store): List<AddressRow> {
         val account = runCatching { Bip32.parseExtendedPubKey(xpub) }.getOrNull() ?: return emptyList()
+        val type = store.scriptType
         val out = mutableListOf<AddressRow>()
         for (chainIndex in 0..1) {
             val branch = Bip32.deriveChild(account, chainIndex)
             for (i in 0 until WATCH_DEPTH) {
                 val child = Bip32.deriveChild(branch, i)
-                val sh = Address.scriptHashFor(child.pubkey(), account.scriptType)
+                val sh = Address.scriptHashFor(child.pubkey(), type)
                 out += AddressRow(
                     chainIndex = chainIndex, index = i,
-                    address = Address.encode(child.pubkey(), account.scriptType),
+                    address = Address.encode(child.pubkey(), type),
                     path = "m/$chainIndex/$i", scriptHash = sh,
                 )
             }

@@ -23,8 +23,8 @@ android {
         applicationId = "com.kilombino.pyblockwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         // No ndk{} block and no abiFilters: this app ships ZERO native libraries,
         // so one APK runs on every ABI. See README-REPRODUCIBLE.md §1.
     }
@@ -92,6 +92,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
@@ -99,6 +100,13 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // QR scanning: CameraX for the preview/analysis and ZXing core (pure Java, no JNI)
+    // for decoding — reading an xpub off the screen is a convenience, not a crypto path.
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
+    implementation("com.google.zxing:core:3.5.3")
 
     // NOTE: there is deliberately no crypto dependency here — no BouncyCastle, no
     // bdk, no secp256k1 JNI. secp256k1, RIPEMD-160, Base58 and Bech32 all live in

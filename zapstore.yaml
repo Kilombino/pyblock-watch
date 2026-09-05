@@ -1,8 +1,7 @@
-pyblock-watch:
-  name: PyBLØCK Watch
-  repository: https://github.com/Kilombino/pyblock-watch
-  icon: assets/icon.png
-  images:
-    - assets/screenshots/1.png
-    - assets/screenshots/2.png
-    - assets/screenshots/3.png
+name: PyBLØCK Watch
+repository: https://github.com/Kilombino/pyblock-watch
+icon: assets/icon.png
+images:
+  - assets/screenshots/1.png
+  - assets/screenshots/2.png
+  - assets/screenshots/3.png

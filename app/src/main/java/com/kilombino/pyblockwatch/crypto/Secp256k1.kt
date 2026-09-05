@@ -111,6 +111,28 @@ object Secp256k1 {
         return Point(x, if (wantOdd == isOdd) y else mod(P - y))
     }
 
+    /**
+     * BIP-340 lift_x: the point with the given x coordinate and EVEN y. Used to turn a
+     * Taproot internal key (an x-only pubkey) back into a curve point before tweaking.
+     */
+    fun liftX(x: BigInteger): Point {
+        require(x < P) { "x coordinate not in field" }
+        val alpha = mod(x.modPow(BigInteger.valueOf(3), P) + B)
+        val y = alpha.modPow((P + BigInteger.ONE).shiftRight(2), P)
+        require(mod(y * y) == alpha) { "x has no corresponding curve point" }
+        return Point(x, if (y.testBit(0)) mod(P - y) else y) // even y
+    }
+
+    /** The 32-byte x-only serialisation of a point (Taproot output/internal keys). */
+    fun xOnly(point: Point): ByteArray {
+        require(!point.isInfinity) { "cannot serialise the point at infinity" }
+        val out = ByteArray(32)
+        val xb = point.x!!.toByteArray()
+        val src = if (xb.size > 32) xb.copyOfRange(xb.size - 32, xb.size) else xb
+        System.arraycopy(src, 0, out, 32 - src.size, src.size)
+        return out
+    }
+
     /** Serialise a point as a 33-byte compressed SEC pubkey. */
     fun compress(point: Point): ByteArray {
         require(!point.isInfinity) { "cannot serialise the point at infinity" }

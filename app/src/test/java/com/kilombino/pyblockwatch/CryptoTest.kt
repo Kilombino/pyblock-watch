@@ -119,6 +119,32 @@ class CryptoTest {
     }
 
     /**
+     * BIP-86 test vector: the canonical `abandon…about` account xpub (m/86'/0'/0')
+     * must yield the published Taproot (bc1p) addresses. A wrong tweak or lift_x
+     * would produce a valid-looking but wrong address, so this is the guard.
+     */
+    @Test
+    fun `bip86 xpub derives the published taproot addresses`() {
+        val xpub = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteo" +
+            "GVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ"
+        val account = Bip32.parseExtendedPubKey(xpub)
+        val receive = Bip32.deriveChild(account, 0)
+        assertEquals(
+            "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
+            Address.encode(Bip32.deriveChild(receive, 0).pubkey(), ScriptType.P2TR),
+        )
+        assertEquals(
+            "bc1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0was9fqzwh",
+            Address.encode(Bip32.deriveChild(receive, 1).pubkey(), ScriptType.P2TR),
+        )
+        val change = Bip32.deriveChild(account, 1)
+        assertEquals(
+            "bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7",
+            Address.encode(Bip32.deriveChild(change, 0).pubkey(), ScriptType.P2TR),
+        )
+    }
+
+    /**
      * The Electrum scripthash of the genesis coinbase address. This exact value was
      * confirmed against both live servers — Fulcrum and Frigate each answered it with
      * a real balance — so it pins our byte order, which is the classic place to get

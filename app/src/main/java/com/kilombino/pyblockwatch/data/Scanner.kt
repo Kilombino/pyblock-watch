@@ -63,7 +63,9 @@ class Scanner(
         chain: Chain,
         endpoint: NodeEndpoint,
         pinnedFingerprint: String?,
+        scriptType: ScriptType,
     ): Flow<ScanEvent> = flow {
+        val purpose = purposeFor(scriptType)
         val parsed = try {
             Bip32.parseExtendedPubKey(xpub)
         } catch (e: IllegalArgumentException) {
@@ -93,12 +95,12 @@ class Scanner(
                 var index = 0
                 var consecutiveEmpty = 0
                 while (consecutiveEmpty < gapLimit) {
-                    val path = "m/$chainIndex/$index"
+                    val path = "m/$purpose'/0'/0'/$chainIndex/$index"
                     emit(ScanEvent.Deriving(chainIndex, index, path))
 
                     val child = Bip32.deriveChild(branch, index)
-                    val scriptHash = Address.scriptHashFor(child.pubkey(), parsed.scriptType)
-                    val address = Address.encode(child.pubkey(), parsed.scriptType)
+                    val scriptHash = Address.scriptHashFor(child.pubkey(), scriptType)
+                    val address = Address.encode(child.pubkey(), scriptType)
 
                     // History first, balance only when there IS history. Most addresses
                     // in a scan are unused, and asking for a balance we already know is
@@ -145,8 +147,16 @@ class Scanner(
     }
 
     companion object {
-        /** Script type is fixed by the xpub prefix, surfaced for the UI to explain. */
+        /** The script type the xpub prefix implies (SLIP-132), or null for a plain xpub. */
         fun scriptTypeOf(xpub: String): ScriptType? =
             runCatching { Bip32.parseExtendedPubKey(xpub).scriptType }.getOrNull()
+
+        /** BIP purpose for a script type: 44 legacy, 49 nested, 84 native segwit, 86 taproot. */
+        fun purposeFor(type: ScriptType): Int = when (type) {
+            ScriptType.P2PKH -> 44
+            ScriptType.P2SH_P2WPKH -> 49
+            ScriptType.P2WPKH -> 84
+            ScriptType.P2TR -> 86
+        }
     }
 }

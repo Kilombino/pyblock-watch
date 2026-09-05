@@ -19,6 +19,12 @@ object Hashes {
     /** Bitcoin's double-SHA256, used for Base58Check checksums. */
     fun doubleSha256(data: ByteArray): ByteArray = sha256(sha256(data))
 
+    /** BIP-340 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || msg). Used by Taproot's TapTweak. */
+    fun taggedHash(tag: String, msg: ByteArray): ByteArray {
+        val t = sha256(tag.toByteArray(Charsets.UTF_8))
+        return sha256(t + t + msg)
+    }
+
     /** HASH160 = RIPEMD160(SHA256(x)) — the payload of every P2PKH/P2WPKH address. */
     fun hash160(data: ByteArray): ByteArray = Ripemd160.digest(sha256(data))
 

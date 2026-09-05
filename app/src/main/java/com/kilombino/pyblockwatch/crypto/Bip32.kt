@@ -7,6 +7,7 @@ enum class ScriptType(val label: String, val explain: String) {
     P2PKH("Legacy", "Direcciones que empiezan por 1. El formato original de Bitcoin."),
     P2SH_P2WPKH("SegWit anidado", "Direcciones que empiezan por 3. SegWit envuelto para monederos antiguos."),
     P2WPKH("SegWit nativo", "Direcciones que empiezan por bc1q. Las más baratas de gastar."),
+    P2TR("Taproot", "Direcciones que empiezan por bc1p. Lo más nuevo y privado."),
 }
 
 /**

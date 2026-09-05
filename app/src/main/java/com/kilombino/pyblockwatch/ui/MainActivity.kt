@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,6 +42,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -72,6 +75,11 @@ class MainActivity : ComponentActivity() {
             PyBlockWatchTheme {
                 val vm: WalletViewModel = viewModel()
                 val state by vm.state.collectAsState()
+                // Notifications are on by default: start the watcher (and ask for the
+                // POST_NOTIFICATIONS permission on Android 13+) as soon as there is a wallet.
+                LaunchedEffect(state.hasWallet, state.notificationsEnabled) {
+                    if (state.hasWallet && state.notificationsEnabled) toggleNotifications(vm, true)
+                }
                 Box(Modifier.fillMaxSize().background(Ink)) {
                     if (state.hasWallet) {
                         WalletScreen(
@@ -105,6 +113,22 @@ class MainActivity : ComponentActivity() {
 private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
     var xpub by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
+    var showScanner by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) showScanner = true }
+
+    if (showScanner) {
+        QrScannerDialog(
+            onResult = { raw ->
+                xpub = Regex("(?:[xyz]pub)[1-9A-HJ-NP-Za-km-z]+").find(raw)?.value ?: raw.trim()
+                showScanner = false
+                if (state.inputError != null) vm.clearError()
+            },
+            onDismiss = { showScanner = false },
+        )
+    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -140,6 +164,13 @@ private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
             modifier = Modifier.fillMaxWidth(),
         )
         state.inputError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
+
+        TextButton(onClick = {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+            ) showScanner = true else cameraPermission.launch(Manifest.permission.CAMERA)
+        }) { Text("📷  Escanear QR con la cámara", color = Purple,
+                  style = MaterialTheme.typography.bodySmall) }
 
         OutlinedTextField(
             value = label,
@@ -439,6 +470,14 @@ private fun SettingsPanel(
         }
 
         Spacer(Modifier.height(14.dp))
+        Text("Tipo de dirección (derivación)",
+             style = MaterialTheme.typography.bodyMedium, color = TextMain)
+        Explain("Cómo se leen las claves de tu xpub. Por defecto BIP84 (bc1q). " +
+            "Cámbialo si tu monedero usa otro formato; se reescanean las dos cadenas.")
+        Spacer(Modifier.height(4.dp))
+        DerivationSelector(state.scriptType, accent) { vm.setScriptType(it) }
+
+        Spacer(Modifier.height(14.dp))
         if (chain.allowsCustomNode) {
             Text("Tu propio nodo ${chain.display}",
                  style = MaterialTheme.typography.bodyMedium, color = TextMain)
@@ -477,6 +516,27 @@ private fun SettingsPanel(
         }
         TextButton(onClick = onForget) {
             Text("olvidar esta xpub", color = Bad, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun DerivationSelector(current: ScriptType?, accent: Color, onSelect: (ScriptType) -> Unit) {
+    fun purpose(t: ScriptType) = when (t) {
+        ScriptType.P2PKH -> 44; ScriptType.P2SH_P2WPKH -> 49
+        ScriptType.P2WPKH -> 84; ScriptType.P2TR -> 86
+    }
+    Column {
+        ScriptType.entries.forEach { t ->
+            val sel = t == current
+            TextButton(onClick = { onSelect(t) }, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    (if (sel) "● " else "○ ") + "BIP${purpose(t)} · ${t.label}  (m/${purpose(t)}'/0'/0')",
+                    color = if (sel) accent else TextMain,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

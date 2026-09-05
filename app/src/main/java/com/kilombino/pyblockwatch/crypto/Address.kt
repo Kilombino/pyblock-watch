@@ -1,5 +1,7 @@
 package com.kilombino.pyblockwatch.crypto
 
+import java.math.BigInteger
+
 /**
  * Address and scriptPubKey derivation, plus the Electrum "scripthash" both of our
  * servers index by.
@@ -28,7 +30,21 @@ object Address {
             }
             // OP_0 <20>
             ScriptType.P2WPKH -> byteArrayOf(0x00, 0x14) + h160
+            // OP_1 <32 = taproot output key>
+            ScriptType.P2TR -> byteArrayOf(0x51, 0x20) + taprootOutputKey(pubkey)
         }
+    }
+
+    /**
+     * BIP-86 key-path Taproot output key: lift the internal key to a point, add
+     * `int(TapTweak(P)) · G`, and take the result's x. No script tree.
+     */
+    private fun taprootOutputKey(pubkey: ByteArray): ByteArray {
+        val xOnly = pubkey.copyOfRange(1, 33)               // drop the compressed parity byte
+        val internal = Secp256k1.liftX(BigInteger(1, xOnly))
+        val t = BigInteger(1, Hashes.taggedHash("TapTweak", xOnly)).mod(Secp256k1.N)
+        val output = Secp256k1.add(internal, Secp256k1.multiply(t, Secp256k1.G))
+        return Secp256k1.xOnly(output)
     }
 
     /** The human-readable address for a public key under [type]. */
@@ -41,6 +57,7 @@ object Address {
                 Base58.encodeChecked(byteArrayOf(P2SH_VERSION.toByte()) + Hashes.hash160(redeem))
             }
             ScriptType.P2WPKH -> Bech32.encodeSegwit(HRP_MAINNET, 0, h160)
+            ScriptType.P2TR -> Bech32.encodeSegwit(HRP_MAINNET, 1, taprootOutputKey(pubkey))
         }
     }
 
