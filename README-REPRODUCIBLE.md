@@ -14,9 +14,13 @@ stays outside the reproducible surface. Here there is nothing to leave out: secp
 arithmetic, RIPEMD-160, Base58Check, Bech32 and BIP-32 derivation are all Kotlin in
 `app/src/main/java/com/kilombino/pyblockwatch/crypto/`, compiled from this repo.
 
-The only native code in the APK arrives transitively from Jetpack Compose:
-`libandroidx.graphics.path.so`, about 10 KB per ABI, a path-parsing helper with no
-cryptographic role. If you want a build with literally zero `.so`, drop Compose.
+The only native code in the APK is prebuilt helpers with **no cryptographic role**,
+pulled transitively and pinned by hash like every other dependency:
+`libandroidx.graphics.path.so` (a Compose path parser), and — since 0.2.0 added the
+QR scanner — `libimage_processing_util_jni.so` and `libsurface_util_jni.so` from
+CameraX (camera frame/surface helpers). The key-handling path stays pure Kotlin from
+this repo; none of these `.so` touch it. Drop Compose and the QR scanner for a build
+with literally zero `.so`.
 
 ## 2. Toolchain pins
 
@@ -52,12 +56,14 @@ A keystore is only needed to *sign*. The unsigned APK is what you compare.
 
 ## 5. Verified result
 
-Version **0.1.0** (versionCode 1):
+Version **0.2.0** (versionCode 2):
 
 ```
 app-release-unsigned.apk
-SHA-256  9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f
+SHA-256  e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c
 ```
+
+(Version 0.1.0, versionCode 1, was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
 
 Verified three ways, all producing that identical hash:
 
@@ -109,9 +115,10 @@ what every future version must keep:
 b8d7ad679fbfbe39f5640bce01d675347f52b27b7ae6f3731d2ad982c92ef135
 ```
 
-The signed v0.1.0 APK you download has SHA-256
-`99a85cf1fd974a88626e2f5a21db5fb14babf6e3c31b13e288cd90c14d095151`; the reproducible
-unsigned build (§5) is `9c97676a…`, and `apksigcopier` (§6) confirms the signed APK is
-exactly that build plus this signature. Distributed via
-[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.1.0) and
+The signed v0.2.0 APK you download has SHA-256
+`2947ca0e1a5bccb5fc31be9e8c772b9e36bd199b157502ed288298645861fbd9`; the reproducible
+unsigned build (§5) is `e668221b…`, and `apksigcopier` (§6) confirms the signed APK is
+exactly that build plus this signature. The certificate is unchanged from 0.1.0 — the
+v3 lineage means the key is the same across versions. Distributed via
+[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.2.0) and
 Zapstore.
