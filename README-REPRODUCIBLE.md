@@ -101,3 +101,17 @@ data. Verify with:
 ```
 apksigner verify -v --print-certs the.apk
 ```
+
+Published **v0.1.0** signer certificate SHA-256 digest — what AppVerifier shows, and
+what every future version must keep:
+
+```
+b8d7ad679fbfbe39f5640bce01d675347f52b27b7ae6f3731d2ad982c92ef135
+```
+
+The signed v0.1.0 APK you download has SHA-256
+`99a85cf1fd974a88626e2f5a21db5fb14babf6e3c31b13e288cd90c14d095151`; the reproducible
+unsigned build (§5) is `9c97676a…`, and `apksigcopier` (§6) confirms the signed APK is
+exactly that build plus this signature. Distributed via
+[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.1.0) and
+Zapstore.
