@@ -79,7 +79,8 @@ Electrum scripthash confirmed against both live servers.
 ./gradlew :app:assembleRelease
 ```
 
-See [README-REPRODUCIBLE.md](README-REPRODUCIBLE.md) to rebuild the published APK and
+See [PUBLISHING.md](PUBLISHING.md) to cut a signed release, and
+[README-REPRODUCIBLE.md](README-REPRODUCIBLE.md) to rebuild the published APK and
 check it byte-for-byte.
 
 ## Licence
