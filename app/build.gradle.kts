@@ -1,9 +1,18 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Release signing credentials live in keystore.properties, which is gitignored and
+// never committed. Without that file the project still builds — you just get an
+// unsigned APK, which is exactly what a third party verifying reproducibility wants.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -20,8 +29,26 @@ android {
         // so one APK runs on every ABI. See README-REPRODUCIBLE.md §1.
     }
 
+    signingConfigs {
+        if (keystoreProps.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // v1 off, v2 + v3 on. v3 carries a rotation lineage, so this key can be
+                // replaced later without users having to uninstall and lose their data —
+                // the gap the upstream PyBLØCK ᛒ app had before it added v3.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             // Off for the same reason the upstream app keeps it off during beta —
             // but here it also removes a whole class of build nondeterminism, which
             // matters more than the ~1 MB it would save on an app this small.
