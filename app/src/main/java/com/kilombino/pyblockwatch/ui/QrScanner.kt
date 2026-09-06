@@ -1,9 +1,12 @@
 package com.kilombino.pyblockwatch.ui
 
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -27,15 +30,21 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.qrcode.QRCodeReader
 import java.util.concurrent.Executors
 
 /**
  * A full-screen QR scanner. Reads an extended public key off another screen or a paper
  * backup so the user doesn't have to type it. CameraX drives the preview; ZXing (pure
  * Java) decodes the frames. Nothing is stored — the decoded text is handed straight back.
+ *
+ * An xpub QR is a *dense* one (BIP-32 extended keys are ~110 base58 chars, so a version
+ * 8–11 symbol with tiny modules). Two things make those readable that a naive scanner
+ * gets wrong: capturing at a high enough resolution that each module survives, and letting
+ * ZXing spend real effort per frame. We ask CameraX for ~1280×720 and turn on TRY_HARDER.
  */
 @Composable
 fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
@@ -56,7 +65,19 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                         val preview = Preview.Builder().build().also {
                             it.setSurfaceProvider(previewView.surfaceProvider)
                         }
+                        // A dense xpub QR needs enough pixels that its small modules survive.
+                        // The default analysis resolution (~640×480) blurs them together; ask
+                        // for 1280×720 or the nearest the camera supports.
+                        val resolution = ResolutionSelector.Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(
+                                    Size(1280, 720),
+                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                                )
+                            )
+                            .build()
                         val analysis = ImageAnalysis.Builder()
+                            .setResolutionSelector(resolution)
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                         analysis.setAnalyzer(executor, QrAnalyzer { text ->
@@ -88,7 +109,15 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
 
 /** Decodes one QR per frame from the Y (luminance) plane; fires [onFound] once. */
 private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.Analyzer {
-    private val reader = QRCodeReader()
+    private val reader = MultiFormatReader().apply {
+        // Spend the extra CPU: a dense xpub QR rarely decodes on the first, easy pass.
+        setHints(
+            mapOf(
+                DecodeHintType.TRY_HARDER to true,
+                DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+            )
+        )
+    }
     @Volatile private var done = false
 
     override fun analyze(image: ImageProxy) {
@@ -98,17 +127,29 @@ private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.
             val buffer = plane.buffer
             val data = ByteArray(buffer.remaining()); buffer.get(data)
             val rowStride = plane.rowStride
-            val source = PlanarYUVLuminanceSource(
+            val base = PlanarYUVLuminanceSource(
                 data, rowStride, image.height, 0, 0, image.width, image.height, false,
             )
-            val result = reader.decode(BinaryBitmap(HybridBinarizer(source)))
-            done = true
-            onFound(result.text)
+            // Try the frame as-is, then rotated: a phone held in portrait feeds the analyzer
+            // a landscape buffer, and ZXing's locator is not fully rotation-invariant on a
+            // dense symbol. One extra attempt per frame costs little and rescues that case.
+            val text = decode(base) ?: decode(base.rotateCounterClockwise())
+            if (text != null) {
+                done = true
+                onFound(text)
+            }
         } catch (_: Exception) {
             // no QR in this frame — keep looking
         } finally {
-            reader.reset()
             image.close()
         }
+    }
+
+    private fun decode(source: com.google.zxing.LuminanceSource): String? = try {
+        reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+    } catch (_: Exception) {
+        null
+    } finally {
+        reader.reset()
     }
 }

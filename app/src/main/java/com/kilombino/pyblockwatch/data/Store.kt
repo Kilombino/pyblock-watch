@@ -81,6 +81,15 @@ class Store(context: Context) {
         prefs.edit().putLong(keyConf(chain), confirmed).putLong(keyUnconf(chain), unconfirmed).apply()
     }
 
+    // The watcher keeps its OWN baseline of what it has already notified about, separate
+    // from the figures the foreground app records — otherwise every open would reset the
+    // baseline and the background notification could never fire.
+    fun lastNotifiedConf(chain: Chain): Long = prefs.getLong(keyNotConf(chain), -1L)
+    fun lastNotifiedUnconf(chain: Chain): Long = prefs.getLong(keyNotUnconf(chain), 0L)
+    fun setLastNotified(chain: Chain, confirmed: Long, unconfirmed: Long) {
+        prefs.edit().putLong(keyNotConf(chain), confirmed).putLong(keyNotUnconf(chain), unconfirmed).apply()
+    }
+
     /** How many consecutive empty addresses end a branch scan. Configurable; sane bounds. */
     var gapLimit: Int
         get() = prefs.getInt(KEY_GAP, 20).coerceIn(5, 100)
@@ -120,6 +129,8 @@ class Store(context: Context) {
         fun keyTotal(c: Chain) = "total_${c.id}"
         fun keyConf(c: Chain) = "conf_${c.id}"
         fun keyUnconf(c: Chain) = "unconf_${c.id}"
+        fun keyNotConf(c: Chain) = "notconf_${c.id}"
+        fun keyNotUnconf(c: Chain) = "notunconf_${c.id}"
         fun keyPin(e: NodeEndpoint) = "pin_${e.host}_${e.port}"
     }
 }

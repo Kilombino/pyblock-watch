@@ -64,12 +64,17 @@ class WatchService : Service() {
                     if (rows.isEmpty()) return@runCatching
                     val endpoint = store.endpoint(chain)
                     val bal = scanner.refreshBalance(rows, endpoint, store.pinnedFingerprint(endpoint))
-                    val prevConf = store.lastConfirmed(chain)
-                    val prevUnconf = store.lastUnconfirmed(chain)
-                    store.setLastBalance(chain, bal.confirmed, bal.unconfirmed)
-                    // prevConf == -1 means "never scanned", so the first observation is not a change.
-                    if (prevConf >= 0 && (bal.confirmed != prevConf || bal.unconfirmed != prevUnconf)) {
-                        notifyChange(chain, prevConf, prevUnconf, bal.confirmed, bal.unconfirmed)
+                    val prevConf = store.lastNotifiedConf(chain)
+                    val prevUnconf = store.lastNotifiedUnconf(chain)
+                    if (bal.confirmed != prevConf || bal.unconfirmed != prevUnconf) {
+                        when {
+                            // Never notified before: announce the balance if there is one, so
+                            // the user gets a first confirmation the watcher is working.
+                            prevConf < 0 -> if (bal.total > 0) notifyFound(chain, bal.confirmed, bal.unconfirmed)
+                            // Otherwise it's a real change: received / sent / mempool / confirmed.
+                            else -> notifyChange(chain, prevConf, prevUnconf, bal.confirmed, bal.unconfirmed)
+                        }
+                        store.setLastNotified(chain, bal.confirmed, bal.unconfirmed)
                     }
                 }
             }
@@ -102,9 +107,27 @@ class WatchService : Service() {
         return out
     }
 
+    /** First time the watcher sees a non-zero balance on a chain — a "yes, I'm watching" ping. */
+    private fun notifyFound(chain: Chain, confirmed: Long, unconfirmed: Long) {
+        ensureChannels()
+        fun btc(sats: Long) = "%.8f".format(sats / 100_000_000f)
+        val text = if (unconfirmed != 0L)
+            "Saldo ${btc(confirmed + unconfirmed)} ₿ · ${btc(unconfirmed)} ₿ en la mempool (0 conf)"
+        else "Saldo ${btc(confirmed)} ₿ · confirmado"
+        val n = Notification.Builder(this, CHANNEL_ALERTS)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle("${chain.display}: saldo detectado")
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setContentIntent(openApp())
+            .build()
+        manager().notify(chain.ordinal + 100, n)
+    }
+
     private fun notifyChange(
         chain: Chain, prevConf: Long, prevUnconf: Long, newConf: Long, newUnconf: Long,
     ) {
+        ensureChannels()
         fun btc(sats: Long) = "%.8f".format(sats.absoluteValue / 100_000_000f)
         val prevTotal = prevConf + prevUnconf
         val newTotal = newConf + newUnconf
@@ -136,7 +159,7 @@ class WatchService : Service() {
         return Notification.Builder(this, CHANNEL_ONGOING)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("Vigilando tus saldos")
-            .setContentText("Consulta cada 15 min · sin servidor de push")
+            .setContentText("Consulta cada 5 min · sin servidor de push")
             .setOngoing(true)
             .setContentIntent(openApp())
             .build()
@@ -158,15 +181,15 @@ class WatchService : Service() {
             NotificationChannel(CHANNEL_ONGOING, "Vigilancia", NotificationManager.IMPORTANCE_MIN)
         )
         m.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALERTS, "Cambios de saldo", NotificationManager.IMPORTANCE_DEFAULT)
+            NotificationChannel(CHANNEL_ALERTS, "Cambios de saldo", NotificationManager.IMPORTANCE_HIGH)
         )
     }
 
     private companion object {
         const val CHANNEL_ONGOING = "watch_ongoing"
-        const val CHANNEL_ALERTS = "watch_alerts"
+        const val CHANNEL_ALERTS = "watch_alerts_v2"
         const val ONGOING_ID = 1
-        const val INTERVAL_MS = 15 * 60 * 1000L
+        const val INTERVAL_MS = 5 * 60 * 1000L
         /** How far down each branch the background check looks. */
         const val WATCH_DEPTH = 20
     }
