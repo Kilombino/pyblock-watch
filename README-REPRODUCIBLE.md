@@ -56,14 +56,14 @@ A keystore is only needed to *sign*. The unsigned APK is what you compare.
 
 ## 5. Verified result
 
-Version **0.4.0** (versionCode 4):
+Version **0.5.0** (versionCode 5):
 
 ```
 app-release-unsigned.apk
-SHA-256  4a10be008fbce652bb7a9f596fae48b8b201a5aa3e4182a794454a2f007c53f3
+SHA-256  5237b543ecd605f7884abb415b811c2753e01a1cf6c101c0b85b8fe172835eac
 ```
 
-(0.3.0 was `1459eee0e7b61c7161a37d682310b5c766fef2b45cc9084e957654e28fa1d8b4`; 0.2.0 was `e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c`; 0.1.0 was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
+(0.4.0 was `4a10be008fbce652bb7a9f596fae48b8b201a5aa3e4182a794454a2f007c53f3`; 0.3.0 was `1459eee0e7b61c7161a37d682310b5c766fef2b45cc9084e957654e28fa1d8b4`; 0.2.0 was `e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c`; 0.1.0 was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
 
 Verified three ways, all producing that identical hash:
 
@@ -115,10 +115,13 @@ what every future version must keep:
 b8d7ad679fbfbe39f5640bce01d675347f52b27b7ae6f3731d2ad982c92ef135
 ```
 
-The signed v0.4.0 APK you download has SHA-256
-`6e1aad68366f35cf3c66814977e0f8bbc0d0d4b416b784b79540787bc2a15ca3`; the reproducible
-unsigned build (§5) is `4a10be00…`, and `apksigcopier` (§6) confirms the signed APK is
-exactly that build plus this signature. The certificate is unchanged from 0.1.0 — the
-v3 lineage means the key is the same across versions. Distributed via
-[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.4.0) and
+The signed v0.5.0 APK you download has SHA-256
+`b83899656568094a22d45c4b90f8bdab11e6f4a11305784dc49317555f752823`; the reproducible
+unsigned build (§5) is `5237b543…`, and `apksigcopier` (§6) confirms the signed APK is
+exactly that build plus this signature. It is signed with `--alignment-preserved`, so the
+signed file is the unsigned build plus only a signature block — no re-zipping — which is
+what lets a verifier's `apksigcopier copy` reproduce it byte for byte. The certificate is
+unchanged from 0.1.0 — the v3 lineage means the key is the same across versions.
+Distributed via
+[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.5.0) and
 Zapstore.

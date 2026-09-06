@@ -31,7 +31,7 @@ import kotlin.math.absoluteValue
  * queries the wallet already makes.
  *
  * The cost is honesty about battery: this is a visible foreground service on a
- * 15-minute loop, not a free push wake-up. The user opts in and can see it running.
+ * 5-minute loop, not a free push wake-up. The user opts in and can see it running.
  */
 class WatchService : Service() {
 
