@@ -23,8 +23,8 @@ android {
         applicationId = "com.kilombino.pyblockwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
         // No ndk{} block and no abiFilters: this app ships ZERO native libraries,
         // so one APK runs on every ABI. See README-REPRODUCIBLE.md §1.
     }

@@ -90,6 +90,30 @@ class Store(context: Context) {
         prefs.edit().putLong(keyNotConf(chain), confirmed).putLong(keyNotUnconf(chain), unconfirmed).apply()
     }
 
+    /**
+     * The set of wallet transactions currently sitting in the mempool, each mapped to the
+     * sats it moved (signed: + received, − sent). Tracked so the watcher can say "nuevo
+     * envío en la mempool: N sats" the moment it appears, and later "primera confirmación
+     * del envío de N sats" when that same txid gets its first confirmation — the amount is
+     * remembered from when it entered the mempool, because a confirmation is balance-neutral
+     * (it only moves sats from unconfirmed to confirmed) and carries no delta of its own.
+     */
+    fun pendingMap(chain: Chain): MutableMap<String, Long> {
+        val raw = prefs.getString(keyPending(chain), null) ?: return mutableMapOf()
+        return runCatching {
+            val obj = org.json.JSONObject(raw)
+            val out = mutableMapOf<String, Long>()
+            obj.keys().forEach { out[it] = obj.getLong(it) }
+            out
+        }.getOrElse { mutableMapOf() }
+    }
+
+    fun setPendingMap(chain: Chain, map: Map<String, Long>) {
+        val obj = org.json.JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString(keyPending(chain), obj.toString()).apply()
+    }
+
     /** How many consecutive empty addresses end a branch scan. Configurable; sane bounds. */
     var gapLimit: Int
         get() = prefs.getInt(KEY_GAP, 20).coerceIn(5, 100)
@@ -113,7 +137,10 @@ class Store(context: Context) {
     fun clearWallet() {
         prefs.edit().apply {
             remove(KEY_XPUB); remove(KEY_LABEL)
-            Chain.entries.forEach { remove(keyTotal(it)) }
+            Chain.entries.forEach {
+                remove(keyTotal(it)); remove(keyConf(it)); remove(keyUnconf(it))
+                remove(keyNotConf(it)); remove(keyNotUnconf(it)); remove(keyPending(it))
+            }
         }.apply()
     }
 
@@ -131,6 +158,7 @@ class Store(context: Context) {
         fun keyUnconf(c: Chain) = "unconf_${c.id}"
         fun keyNotConf(c: Chain) = "notconf_${c.id}"
         fun keyNotUnconf(c: Chain) = "notunconf_${c.id}"
+        fun keyPending(c: Chain) = "pending_${c.id}"
         fun keyPin(e: NodeEndpoint) = "pin_${e.host}_${e.port}"
     }
 }

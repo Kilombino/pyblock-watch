@@ -7,6 +7,8 @@ import com.kilombino.pyblockwatch.chain.Chain
 import com.kilombino.pyblockwatch.chain.NodeEndpoint
 import com.kilombino.pyblockwatch.crypto.ScriptType
 import com.kilombino.pyblockwatch.data.AddressRow
+import com.kilombino.pyblockwatch.data.BalanceWatch
+import com.kilombino.pyblockwatch.data.Notifier
 import com.kilombino.pyblockwatch.data.ScanEvent
 import com.kilombino.pyblockwatch.data.Scanner
 import com.kilombino.pyblockwatch.data.Store
@@ -52,6 +54,7 @@ data class UiState(
     val chains: Map<Chain, ChainState> = Chain.entries.associateWith { ChainState() },
     val notificationsEnabled: Boolean = false,
     val gapLimit: Int = 20,
+    val secondsUntilRefresh: Int = 30,
     val inputError: String? = null,
 ) {
     val current: ChainState get() = chains[selected] ?: ChainState()
@@ -62,6 +65,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = Store(app)
     private val scanner = Scanner()
+    private val notifier = Notifier(app)
     private val jobs = mutableMapOf<Chain, Job>()
     private var refreshJob: Job? = null
 
@@ -84,13 +88,26 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         startRefreshLoop()
     }
 
-    /** While the app is open, quietly refresh the SELECTED chain's balance every 30 s. */
+    /**
+     * While the app is open, refresh the SELECTED chain every [REFRESH_SECONDS] seconds
+     * with a visible countdown, so the user can see the wallet is live rather than wonder
+     * whether it is stuck. Each refresh runs the same notification engine as the background
+     * watcher, so a movement seen here fires the same alerts — just far sooner.
+     */
     private fun startRefreshLoop() {
         refreshJob?.cancel()
+        _state.update { it.copy(secondsUntilRefresh = REFRESH_SECONDS) }
         refreshJob = viewModelScope.launch {
+            var remaining = REFRESH_SECONDS
             while (true) {
-                delay(30_000)
-                if (!_state.value.xpub.isNullOrBlank()) refresh(_state.value.selected)
+                delay(1_000)
+                if (_state.value.xpub.isNullOrBlank()) { remaining = REFRESH_SECONDS; continue }
+                remaining--
+                if (remaining <= 0) {
+                    refresh(_state.value.selected)
+                    remaining = REFRESH_SECONDS
+                }
+                _state.update { it.copy(secondsUntilRefresh = remaining.coerceAtLeast(0)) }
             }
         }
     }
@@ -98,6 +115,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Silent balance refresh of the addresses already found for [chain] — no gap walk,
      * no "scanning" flicker. Falls back to a full scan if nothing has been found yet.
+     * On success it feeds the fresh figures to [BalanceWatch], which decides whether the
+     * change deserves a notification (mempool arrival, first confirmation, …).
      */
     fun refresh(chain: Chain) {
         val xpub = _state.value.xpub ?: return
@@ -108,7 +127,12 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 val endpoint = store.endpoint(chain)
                 val pin = store.pinnedFingerprint(endpoint)
                 val (rows, txs, tip) = scanner.refreshDetails(cs.rows, endpoint, pin)
-                store.setLastBalance(chain, rows.sumOf { it.confirmed }, rows.sumOf { it.unconfirmed })
+                val conf = rows.sumOf { it.confirmed }
+                val unconf = rows.sumOf { it.unconfirmed }
+                store.setLastBalance(chain, conf, unconf)
+                if (store.notificationsEnabled) {
+                    BalanceWatch.evaluate(store, notifier, chain, conf, unconf, txs)
+                }
                 update(chain) { it.copy(rows = rows, transactions = txs, height = tip) }
             }
         }
@@ -258,5 +282,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s ->
             s.copy(chains = s.chains + (chain to f(s.chains[chain] ?: ChainState())))
         }
+    }
+
+    private companion object {
+        /** Foreground auto-refresh cadence, and the countdown the UI shows. */
+        const val REFRESH_SECONDS = 30
     }
 }

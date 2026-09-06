@@ -157,5 +157,20 @@ fun formatSats(sats: Long): Pair<String, String> {
     return "$coins" to rest
 }
 
+/**
+ * Group a sats amount with thin spaces (12 345 678) so the primary figure reads as an
+ * exact integer count of sats, never rounded to whole bitcoin. A narrow no-break space
+ * keeps the digits from wrapping mid-number.
+ */
+fun groupSats(sats: Long): String {
+    val digits = kotlin.math.abs(sats).toString()
+    val sb = StringBuilder()
+    for ((i, c) in digits.withIndex()) {
+        if (i > 0 && (digits.length - i) % 3 == 0) sb.append('\u202F')
+        sb.append(c)
+    }
+    return (if (sats < 0) "-" else "") + sb
+}
+
 fun shortAddress(a: String): String =
     if (a.length <= 20) a else "${a.take(10)}…${a.takeLast(8)}"

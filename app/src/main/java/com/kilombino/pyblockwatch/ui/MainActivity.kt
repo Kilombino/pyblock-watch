@@ -233,7 +233,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
 
         ChainSwitcher(state.selected, state.chains, vm::select)
 
-        BalanceCard(chain, cs, accent, state.scriptType)
+        BalanceCard(chain, cs, accent, state.scriptType, state.secondsUntilRefresh)
 
         ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
 
@@ -304,7 +304,7 @@ private fun ChainSwitcher(selected: Chain, chains: Map<Chain, ChainState>, onSel
                 val st = chains[c]
                 val sats = st?.total ?: 0L
                 Text(
-                    if (st?.phase is ScanPhase.Complete) "${formatSats(sats).first} ₿" else "…",
+                    if (st?.phase is ScanPhase.Complete) "${groupSats(sats)} sats" else "…",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (active) TextSoft else TextFaint,
                 )
@@ -314,29 +314,34 @@ private fun ChainSwitcher(selected: Chain, chains: Map<Chain, ChainState>, onSel
 }
 
 @Composable
-private fun BalanceCard(chain: Chain, cs: ChainState, accent: Color, scriptType: ScriptType?) {
-    // Count the balance up rather than snapping: the movement is what tells the
-    // user a number just changed, and it makes the two chains feel comparable.
-    val target = cs.total / 100_000_000f
-    val shown by animateFloatAsState(target, tween(900), label = "balance")
-
+private fun BalanceCard(
+    chain: Chain, cs: ChainState, accent: Color, scriptType: ScriptType?, secondsUntilRefresh: Int,
+) {
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("saldo ${chain.display}", accent)
             Spacer(Modifier.weight(1f))
-            if (cs.phase is ScanPhase.Complete) PulseDot(Good, 7)
+            // A visible countdown to the next auto-refresh, so the wallet reads as live.
+            if (cs.phase is ScanPhase.Complete) {
+                Text("↻ ${secondsUntilRefresh}s", style = MaterialTheme.typography.bodySmall,
+                     color = TextFaint)
+                Spacer(Modifier.width(8.dp))
+                PulseDot(Good, 7)
+            }
         }
         Spacer(Modifier.height(6.dp))
+        // Sats is the primary figure — an exact integer count, never rounded to bitcoin.
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("%.8f".format(shown), style = MaterialTheme.typography.displayLarge, color = accent)
+            Text(groupSats(cs.total), style = MaterialTheme.typography.displayLarge, color = accent)
             Spacer(Modifier.width(8.dp))
-            Text("₿", style = MaterialTheme.typography.titleLarge, color = accent.copy(alpha = 0.7f))
+            Text("sats", style = MaterialTheme.typography.titleLarge, color = accent.copy(alpha = 0.7f))
         }
-        Text("${cs.total} sats", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+        Text("%.8f ₿".format(cs.total / 100_000_000.0),
+             style = MaterialTheme.typography.bodySmall, color = TextFaint)
 
         if (cs.unconfirmed != 0L) {
             Spacer(Modifier.height(4.dp))
-            Text("sin confirmar: ${cs.unconfirmed} sats",
+            Text("sin confirmar: ${groupSats(cs.unconfirmed)} sats",
                  style = MaterialTheme.typography.bodySmall, color = Warn)
         }
         Spacer(Modifier.height(10.dp))
@@ -432,7 +437,7 @@ private fun AddressList(rows: List<AddressRow>, accent: Color) {
                     )
                 }
                 Text(
-                    "%.8f".format(row.total / 100_000_000f),
+                    if (row.total > 0) "${groupSats(row.total)} sats" else "—",
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (row.total > 0) accent else TextFaint,
                     fontWeight = FontWeight.Bold,
