@@ -108,6 +108,14 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.google.zxing:core:3.5.3")
 
+    // Biometric / device-credential gate for spending. This does NOT sign or hold keys — it
+    // only unlocks the Android Keystore cipher that decrypts the seed (see SeedVault). The
+    // signing itself stays in the pure-Kotlin crypto path.
+    implementation("androidx.biometric:biometric:1.1.0")
+    // biometric 1.1.0 pins an old androidx.fragment (1.2.x); registerForActivityResult needs
+    // 1.3.0+, so pull a current fragment forward explicitly.
+    implementation("androidx.fragment:fragment:1.8.5")
+
     // NOTE: there is deliberately no crypto dependency here — no BouncyCastle, no
     // bdk, no secp256k1 JNI. secp256k1, RIPEMD-160, Base58 and Bech32 all live in
     // app/src/main/java/.../crypto/ so the entire cryptographic path is source you

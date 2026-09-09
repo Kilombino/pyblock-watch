@@ -95,6 +95,25 @@ class SigningTest {
     }
 
     @Test
+    fun `bip84 account zpub and first address match the published vector`() {
+        val mnemonic = ("abandon abandon abandon abandon abandon abandon " +
+            "abandon abandon abandon abandon abandon about").split(" ")
+        val master = Bip32Priv.fromSeed(Bip39.toSeed(mnemonic))
+        val zpub = Bip32Priv.accountXpub(master, purpose = 84, account = 0)
+        assertEquals(
+            "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtf" +
+                "SdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+            zpub,
+        )
+        val first = Bip32Priv.derivePath(master, "m/84'/0'/0'/0/0")
+        assertEquals(
+            "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+            com.kilombino.pyblockwatch.crypto.Address.encode(
+                first.publicKey(), com.kilombino.pyblockwatch.crypto.ScriptType.P2WPKH),
+        )
+    }
+
+    @Test
     fun `private key one has G as its public point`() {
         val pub = Secp256k1.multiply(BigInteger.ONE, Secp256k1.G)
         assertEquals(Secp256k1.compress(Secp256k1.G).toHex(), Secp256k1.compress(pub).toHex())

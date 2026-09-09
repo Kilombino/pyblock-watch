@@ -33,9 +33,42 @@ object Bip32Priv {
             return out
         }
 
+        /** BIP-32 fingerprint: the first 4 bytes of hash160 of this node's public key. */
+        fun fingerprint(): ByteArray = Hashes.hash160(publicKey()).copyOf(4)
+
         override fun equals(other: Any?): Boolean =
             other is ExtendedPrivKey && key == other.key && chainCode.contentEquals(other.chainCode)
         override fun hashCode(): Int = key.hashCode() * 31 + chainCode.contentHashCode()
+    }
+
+    /** SLIP-132 public version bytes for the extended key of a given BIP purpose. */
+    private fun xpubVersion(purpose: Int): Int = when (purpose) {
+        84 -> 0x04B24746 // zpub (native SegWit)
+        49 -> 0x049D7CB2 // ypub (nested SegWit)
+        else -> 0x0488B21E // xpub (legacy and, by convention, Taproot descriptors)
+    }
+
+    /**
+     * The account-level extended PUBLIC key (e.g. a zpub for m/84'/0'/0') for [account],
+     * ready to hand to the existing watch-only scanner. Deriving it here means the hot
+     * wallet reuses the same address discovery as an imported xpub, with the private half
+     * never leaving this object.
+     */
+    fun accountXpub(master: ExtendedPrivKey, purpose: Int, account: Int = 0): String {
+        val coinNode = deriveChild(deriveChild(master, purpose, hardened = true), 0, hardened = true)
+        val accountNode = deriveChild(coinNode, account, hardened = true)
+        val childNumber = account or HARDENED
+        val v = xpubVersion(purpose)
+        val out = ByteArray(78)
+        out[0] = (v ushr 24).toByte(); out[1] = (v ushr 16).toByte()
+        out[2] = (v ushr 8).toByte(); out[3] = v.toByte()
+        out[4] = 3 // depth: m / purpose' / coin' / account'
+        System.arraycopy(coinNode.fingerprint(), 0, out, 5, 4)
+        out[9] = (childNumber ushr 24).toByte(); out[10] = (childNumber ushr 16).toByte()
+        out[11] = (childNumber ushr 8).toByte(); out[12] = childNumber.toByte()
+        System.arraycopy(accountNode.chainCode, 0, out, 13, 32)
+        System.arraycopy(accountNode.publicKey(), 0, out, 45, 33)
+        return Base58.encodeChecked(out)
     }
 
     /** Master key from a BIP-39 seed: I = HMAC-SHA512("Bitcoin seed", seed). */
