@@ -5,7 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -63,7 +63,7 @@ import com.kilombino.pyblockwatch.data.AddressRow
 import com.kilombino.pyblockwatch.data.TxConf
 import com.kilombino.pyblockwatch.data.WatchService
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val notifPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -112,6 +112,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
+    var mode by remember { mutableStateOf("home") }
+    when (mode) {
+        "dice" -> { DiceScreen(vm) { mode = "home" }; return }
+        "restore" -> { RestoreScreen(vm) { mode = "home" }; return }
+    }
+
     var xpub by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
     var showScanner by remember { mutableStateOf(false) }
@@ -136,69 +142,82 @@ private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(40.dp))
-        Text("PyBLØCK", style = MaterialTheme.typography.displayLarge, color = Purple)
-        Text("WATCH", style = MaterialTheme.typography.titleLarge, color = TextSoft)
+        Text("Kilombino", style = MaterialTheme.typography.displayLarge, color = Purple)
+        Text("BITCOIN-BLAKE2b WALLET", style = MaterialTheme.typography.titleLarge, color = TextSoft)
 
         Panel(accent = Purple) {
-            SectionLabel("Solo lectura, por diseño")
+            SectionLabel("A spending wallet")
             Spacer(Modifier.height(8.dp))
             Explain(
-                "Esta app mira, no gasta. No contiene código de firma: aunque quisiera, " +
-                    "no podría mover una sola moneda. Por eso solo le das tu clave PÚBLICA " +
-                    "extendida — la xpub — que sirve para calcular tus direcciones y " +
-                    "consultar sus saldos, pero nunca para gastar."
+                "Create a wallet you can send from. Its seed is generated on THIS phone — roll " +
+                    "real dice, SeedSigner-style — and stored encrypted, unlocked only by your " +
+                    "fingerprint or PIN when you spend. Native SegWit (bc1q) by default."
             )
             Spacer(Modifier.height(10.dp))
-            Explain(
-                "Cuidado con la privacidad: una xpub revela TODAS tus direcciones, " +
-                    "presentes y futuras. Guárdala como guardarías tu extracto bancario."
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { mode = "dice" },
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple, contentColor = Ink),
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                ) { Text("NEW (DICE)", style = MaterialTheme.typography.titleMedium) }
+                Button(
+                    onClick = { mode = "restore" },
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextMain),
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                ) { Text("RESTORE", style = MaterialTheme.typography.titleMedium) }
+            }
         }
-
-        OutlinedTextField(
-            value = xpub,
-            onValueChange = { xpub = it; if (state.inputError != null) vm.clearError() },
-            label = { Text("xpub / ypub / zpub", style = MaterialTheme.typography.bodySmall) },
-            textStyle = MaterialTheme.typography.bodySmall,
-            isError = state.inputError != null,
-            minLines = 3,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        state.inputError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
-
-        TextButton(onClick = {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                PackageManager.PERMISSION_GRANTED
-            ) showScanner = true else cameraPermission.launch(Manifest.permission.CAMERA)
-        }) { Text("📷  Escanear QR con la cámara", color = Purple,
-                  style = MaterialTheme.typography.bodySmall) }
-
-        OutlinedTextField(
-            value = label,
-            onValueChange = { label = it },
-            label = { Text("Nombre (opcional)", style = MaterialTheme.typography.bodySmall) },
-            textStyle = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Button(
-            onClick = { vm.setXpub(xpub, label) },
-            enabled = xpub.isNotBlank(),
-            colors = ButtonDefaults.buttonColors(containerColor = Purple, contentColor = Ink),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("MIRAR LAS DOS CADENAS", style = MaterialTheme.typography.titleMedium) }
 
         Panel(accent = Orange) {
-            SectionLabel("Qué va a pasar", Orange)
+            SectionLabel("Or watch only", Orange)
             Spacer(Modifier.height(8.dp))
             Explain(
-                "Se consultará la MISMA xpub en las dos cadenas: la bifurcación BLAKE2b y " +
-                    "la SHA-256 clásica. Comparten el mismo bloque génesis y el mismo sistema " +
-                    "de direcciones, así que tus llaves existen en ambas — pero los saldos " +
-                    "divergieron el día de la bifurcación. Verás las dos cifras por separado."
+                "Paste an extended PUBLIC key (xpub/ypub/zpub) to watch balances without any way " +
+                    "to spend. Careful: an xpub reveals every address you will ever use — keep it " +
+                    "like a bank statement."
             )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = xpub,
+                onValueChange = { xpub = it; if (state.inputError != null) vm.clearError() },
+                label = { Text("xpub / ypub / zpub", style = MaterialTheme.typography.bodySmall) },
+                textStyle = MaterialTheme.typography.bodySmall,
+                isError = state.inputError != null,
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            state.inputError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
+
+            TextButton(onClick = {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED
+                ) showScanner = true else cameraPermission.launch(Manifest.permission.CAMERA)
+            }) { Text("📷  Scan a QR with the camera", color = Orange,
+                      style = MaterialTheme.typography.bodySmall) }
+
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                label = { Text("Name (optional)", style = MaterialTheme.typography.bodySmall) },
+                textStyle = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = { vm.setXpub(xpub, label) },
+                enabled = xpub.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = Orange, contentColor = Ink),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("WATCH BOTH CHAINS", style = MaterialTheme.typography.titleMedium) }
         }
+
+        Explain(
+            "Either way, the same keys exist on both forks: the BLAKE2b chain and the classic " +
+                "SHA-256 one share a genesis and an address system, but balances diverged at the " +
+                "fork. You will see the two figures separately."
+        )
     }
 }
 
@@ -210,6 +229,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     val cs = state.current
     val accent by animateColorAsState(Color(chain.accent), tween(400), label = "accent")
     var showSettings by remember { mutableStateOf(false) }
+    var showSend by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -219,14 +239,14 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("PyBLØCK WATCH", style = MaterialTheme.typography.titleMedium, color = accent)
+                Text("KILOMBINO", style = MaterialTheme.typography.titleMedium, color = accent)
                 Text(
-                    state.label.ifBlank { "monedero solo lectura" },
+                    state.label.ifBlank { if (state.isHot) "spending wallet" else "watch-only wallet" },
                     style = MaterialTheme.typography.bodySmall, color = TextFaint,
                 )
             }
             TextButton(onClick = { showSettings = !showSettings }) {
-                Text(if (showSettings) "cerrar" else "ajustes",
+                Text(if (showSettings) "close" else "settings",
                      style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
         }
@@ -235,25 +255,37 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
 
         BalanceCard(chain, cs, accent, state.scriptType, state.secondsUntilRefresh)
 
+        if (state.isHot) {
+            if (showSend) {
+                SendSheet(vm, accent) { showSend = false }
+            } else {
+                Button(
+                    onClick = { vm.resetSend(); showSend = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
+                ) { Text("SEND", style = MaterialTheme.typography.titleMedium) }
+            }
+        }
+
         ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
 
         if (cs.transactions.isNotEmpty()) MovementsCard(cs.transactions, accent)
 
         if (cs.fingerprintChanged) {
             Panel(accent = Bad) {
-                SectionLabel("El certificado del servidor ha CAMBIADO", Bad)
+                SectionLabel("The server certificate has CHANGED", Bad)
                 Spacer(Modifier.height(8.dp))
                 Explain(
-                    "La huella no coincide con la que vimos la primera vez. Puede ser un " +
-                        "cambio legítimo (certificado renovado) o alguien interponiéndose. " +
-                        "No lo aceptes sin comprobarlo por otra vía."
+                    "The fingerprint does not match the one we first saw. It may be a legitimate " +
+                        "change (a renewed certificate) or someone in the middle. " +
+                        "Do not accept it without checking through another channel."
                 )
                 Spacer(Modifier.height(6.dp))
                 cs.fingerprint?.let {
                     SelectionContainer { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
                 }
                 TextButton(onClick = { vm.trustCurrentCertificate(chain) }) {
-                    Text("He comprobado la huella: confiar", color = Warn,
+                    Text("I have checked the fingerprint: trust", color = Warn,
                          style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -266,13 +298,13 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         if (cs.rows.isNotEmpty()) AddressList(cs.rows, accent)
 
         Panel(accent = accent) {
-            SectionLabel("Cómo se encuentran tus monedas", accent)
+            SectionLabel("How your coins are found", accent)
             Spacer(Modifier.height(8.dp))
             Explain(
-                "Tu xpub no guarda una lista de direcciones: las genera. La app deriva " +
-                    "m/0/0, m/0/1, m/0/2… y pregunta al servidor por cada una. Cuando " +
-                    "encuentra ${'$'}{20} vacías seguidas, asume que no hay más y para. Eso es " +
-                    "el «límite de hueco», y es lo que dibuja el círculo de arriba mientras escanea."
+                "Your xpub does not store a list of addresses: it generates them. The app derives " +
+                    "m/0/0, m/0/1, m/0/2… and asks the server about each. When it finds " +
+                    "${'$'}{20} empty in a row, it assumes there are no more and stops. That is " +
+                    "the «gap limit», and it is what the ring above draws while it scans."
             )
         }
         Spacer(Modifier.height(30.dp))
@@ -319,7 +351,7 @@ private fun BalanceCard(
 ) {
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("saldo ${chain.display}", accent)
+            SectionLabel("${chain.display} balance", accent)
             Spacer(Modifier.weight(1f))
             // A visible countdown to the next auto-refresh, so the wallet reads as live.
             if (cs.phase is ScanPhase.Complete) {
@@ -341,12 +373,12 @@ private fun BalanceCard(
 
         if (cs.unconfirmed != 0L) {
             Spacer(Modifier.height(4.dp))
-            Text("sin confirmar: ${groupSats(cs.unconfirmed)} sats",
+            Text("unconfirmed: ${groupSats(cs.unconfirmed)} sats",
                  style = MaterialTheme.typography.bodySmall, color = Warn)
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "${cs.usedAddresses} direcciones con uso · altura ${cs.height}",
+            "${cs.usedAddresses} used addresses · height ${cs.height}",
             style = MaterialTheme.typography.bodySmall, color = TextSoft,
         )
         scriptType?.let {
@@ -367,14 +399,14 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
             label = "phase",
         ) { phase ->
             when (phase) {
-                is ScanPhase.Idle -> Text("en espera", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                is ScanPhase.Idle -> Text("idle", style = MaterialTheme.typography.bodySmall, color = TextFaint)
 
                 is ScanPhase.Connecting -> Row(verticalAlignment = Alignment.CenterVertically) {
                     PulseDot(accent); Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("conectando con ${phase.endpoint}",
+                        Text("connecting to ${phase.endpoint}",
                              style = MaterialTheme.typography.bodyMedium, color = accent)
-                        Explain("El primer saludo TLS con Frigate puede tardar hasta 40 s.")
+                        Explain("The first TLS handshake with Frigate can take up to 40s.")
                     }
                 }
 
@@ -384,10 +416,10 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         DerivationTicker(phase.path, accent)
                         Text(
-                            if (phase.chainIndex == 0) "cadena de recepción" else "cadena de cambio",
+                            if (phase.chainIndex == 0) "receive chain" else "change chain",
                             style = MaterialTheme.typography.bodySmall, color = TextFaint,
                         )
-                        Text("${phase.gapUsed}/${phase.gapLimit} vacías seguidas",
+                        Text("${phase.gapUsed}/${phase.gapLimit} empty in a row",
                              style = MaterialTheme.typography.bodySmall, color = TextSoft)
                     }
                 }
@@ -395,24 +427,24 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
                 is ScanPhase.Complete -> Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         PulseDot(Good); Spacer(Modifier.width(10.dp))
-                        Text("escaneo completo", style = MaterialTheme.typography.bodyMedium, color = Good)
+                        Text("scan complete", style = MaterialTheme.typography.bodyMedium, color = Good)
                     }
                     cs.server?.let {
                         Spacer(Modifier.height(6.dp))
-                        Text("servidor: $it", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                        Text("server: $it", style = MaterialTheme.typography.bodySmall, color = TextSoft)
                     }
                     cs.fingerprint?.let {
-                        Text("huella fijada: ${it.take(16)}…",
+                        Text("pinned fingerprint: ${it.take(16)}…",
                              style = MaterialTheme.typography.bodySmall, color = TextFaint)
                     }
                 }
 
                 is ScanPhase.Error -> Column {
-                    Text("no se pudo completar", style = MaterialTheme.typography.bodyMedium, color = Bad)
+                    Text("could not complete", style = MaterialTheme.typography.bodyMedium, color = Bad)
                     Spacer(Modifier.height(4.dp))
                     Explain(phase.message)
                     TextButton(onClick = onRetry) {
-                        Text("reintentar", color = accent, style = MaterialTheme.typography.bodySmall)
+                        Text("retry", color = accent, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -423,7 +455,7 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
 @Composable
 private fun AddressList(rows: List<AddressRow>, accent: Color) {
     Panel(accent = accent) {
-        SectionLabel("direcciones con actividad", accent)
+        SectionLabel("addresses with activity", accent)
         Spacer(Modifier.height(10.dp))
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -432,7 +464,7 @@ private fun AddressList(rows: List<AddressRow>, accent: Color) {
                     Text(shortAddress(row.address),
                          style = MaterialTheme.typography.bodyMedium, color = TextMain)
                     Text(
-                        "${row.path}  ·  ${if (row.chainIndex == 0) "recepción" else "cambio"}",
+                        "${row.path}  ·  ${if (row.chainIndex == 0) "receive" else "change"}",
                         style = MaterialTheme.typography.bodySmall, color = TextFaint,
                     )
                 }
@@ -460,15 +492,15 @@ private fun SettingsPanel(
     var port by remember(chain) { mutableStateOf(vm.endpointFor(chain).port.toString()) }
 
     Panel(accent = accent) {
-        SectionLabel("ajustes", accent)
+        SectionLabel("settings", accent)
         Spacer(Modifier.height(10.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Avisarme si cambia el saldo",
+                Text("Tell me when the balance changes",
                      style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                Explain("Un servicio comprueba las direcciones ya descubiertas cada 15 minutos. " +
-                    "Sin servidor de push, sin Google: la consulta la hace tu teléfono.")
+                Explain("A service checks the already-discovered addresses every 15 minutes. " +
+                    "No push server, no Google: your phone does the lookup itself.")
             }
             Switch(
                 checked = state.notificationsEnabled,
@@ -478,20 +510,20 @@ private fun SettingsPanel(
         }
 
         Spacer(Modifier.height(14.dp))
-        Text("Tipo de dirección (derivación)",
+        Text("Address type (derivation)",
              style = MaterialTheme.typography.bodyMedium, color = TextMain)
-        Explain("Cómo se leen las claves de tu xpub. Por defecto BIP84 (bc1q). " +
-            "Cámbialo si tu monedero usa otro formato; se reescanean las dos cadenas.")
+        Explain("How the keys are read from your xpub. BIP84 (bc1q) by default. " +
+            "Change it if your wallet uses another format; both chains are rescanned.")
         Spacer(Modifier.height(4.dp))
         DerivationSelector(state.scriptType, accent) { vm.setScriptType(it) }
 
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Límite de hueco (gap): ${state.gapLimit}",
+                Text("Gap limit: ${state.gapLimit}",
                      style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                Explain("Cuántas direcciones vacías seguidas se revisan antes de parar. " +
-                    "Súbelo si usas muchas direcciones; bájalo para escanear más rápido.")
+                Explain("How many empty addresses in a row are checked before stopping. " +
+                    "Raise it if you use many addresses; lower it to scan faster.")
             }
             TextButton(onClick = { vm.setGapLimit(state.gapLimit - 5) }) {
                 Text("−5", color = accent, style = MaterialTheme.typography.bodyMedium)
@@ -503,9 +535,9 @@ private fun SettingsPanel(
 
         Spacer(Modifier.height(14.dp))
         if (chain.allowsCustomNode) {
-            Text("Tu propio nodo ${chain.display}",
+            Text("Your own ${chain.display} node",
                  style = MaterialTheme.typography.bodyMedium, color = TextMain)
-            Explain("Déjalo vacío para usar ${chain.defaultHost}:${chain.defaultPort}.")
+            Explain("Leave empty to use ${chain.defaultHost}:${chain.defaultPort}.")
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -516,18 +548,18 @@ private fun SettingsPanel(
                 )
                 OutlinedTextField(
                     value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) },
-                    label = { Text("puerto", style = MaterialTheme.typography.bodySmall) },
+                    label = { Text("port", style = MaterialTheme.typography.bodySmall) },
                     textStyle = MaterialTheme.typography.bodySmall,
                     singleLine = true, modifier = Modifier.weight(1f),
                 )
             }
             TextButton(onClick = {
                 vm.setCustomNode(chain, host.ifBlank { null }, port.toIntOrNull() ?: chain.defaultPort)
-            }) { Text("aplicar y reescanear", color = accent, style = MaterialTheme.typography.bodySmall) }
+            }) { Text("apply and rescan", color = accent, style = MaterialTheme.typography.bodySmall) }
         } else {
             Explain(
-                "La cadena SHA-256 es solo consulta: sirve para encontrar tus monedas con la " +
-                    "xpub, y por eso no ofrece nodo propio."
+                "The SHA-256 chain is lookup-only: it finds your coins from the xpub, so it " +
+                    "offers no custom node."
             )
         }
 
@@ -539,7 +571,7 @@ private fun SettingsPanel(
             )
         }
         TextButton(onClick = onForget) {
-            Text("olvidar esta xpub", color = Bad, style = MaterialTheme.typography.bodySmall)
+            Text("forget this wallet", color = Bad, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -568,7 +600,7 @@ private fun DerivationSelector(current: ScriptType?, accent: Color, onSelect: (S
 @Composable
 private fun MovementsCard(txs: List<TxConf>, accent: Color) {
     Panel(accent = accent) {
-        SectionLabel("movimientos · confirmaciones", accent)
+        SectionLabel("movements · confirmations", accent)
         Spacer(Modifier.height(8.dp))
         txs.take(15).forEach { t ->
             Row(
@@ -581,7 +613,7 @@ private fun MovementsCard(txs: List<TxConf>, accent: Color) {
                     modifier = Modifier.weight(1f),
                 )
                 if (t.pending) {
-                    Text("en mempool · 0 conf",
+                    Text("in mempool · 0 conf",
                          style = MaterialTheme.typography.bodySmall, color = Warn)
                 } else {
                     Text(
@@ -593,7 +625,7 @@ private fun MovementsCard(txs: List<TxConf>, accent: Color) {
             }
         }
         if (txs.size > 15) {
-            Text("… y ${txs.size - 15} más",
+            Text("… and ${txs.size - 15} more",
                  style = MaterialTheme.typography.bodySmall, color = TextFaint)
         }
     }

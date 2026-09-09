@@ -82,14 +82,14 @@ class Scanner(
         try {
             client.connect()
         } catch (e: Exception) {
-            emit(ScanEvent.Failed(e.message ?: "No se pudo conectar")); return@flow
+            emit(ScanEvent.Failed(e.message ?: "Could not connect")); return@flow
         }
 
         val rows = mutableListOf<AddressRow>()
         try {
             val height = client.blockHeight()
             emit(ScanEvent.Connected(
-                client.serverVersion ?: "desconocido", height,
+                client.serverVersion ?: "unknown", height,
                 client.serverFingerprint, client.fingerprintChanged,
             ))
 
@@ -137,7 +137,7 @@ class Scanner(
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
             emit(ScanEvent.Done(rows, height, txs))
         } catch (e: Exception) {
-            emit(ScanEvent.Failed(e.message ?: "Fallo durante el escaneo"))
+            emit(ScanEvent.Failed(e.message ?: "The scan failed"))
         } finally {
             client.close()
         }
@@ -188,6 +188,56 @@ class Scanner(
                 TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0)
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
             Triple(updated, txs, tip)
+        } finally {
+            client.close()
+        }
+    }
+
+    /** A spendable output tagged with the derivation that unlocks it (chain/index of its address). */
+    data class SpendableUtxo(
+        val txid: String, val vout: Int, val value: Long,
+        val chainIndex: Int, val index: Int, val height: Int,
+    )
+
+    /** Every unspent output the wallet's discovered addresses hold — the coins a send can draw on. */
+    suspend fun gatherUtxos(
+        rows: List<AddressRow>, endpoint: NodeEndpoint, pinnedFingerprint: String?,
+    ): List<SpendableUtxo> {
+        val client = ElectrumClient(endpoint, pinnedFingerprint)
+        return try {
+            client.connect()
+            rows.flatMap { r ->
+                client.listUnspent(r.scriptHash).map {
+                    SpendableUtxo(it.txid, it.vout, it.value, r.chainIndex, r.index, it.height)
+                }
+            }
+        } finally {
+            client.close()
+        }
+    }
+
+    /** Broadcast a signed raw transaction; returns the txid or throws the server's reason. */
+    suspend fun broadcast(rawTxHex: String, endpoint: NodeEndpoint, pinnedFingerprint: String?): String {
+        val client = ElectrumClient(endpoint, pinnedFingerprint)
+        return try {
+            client.connect()
+            client.broadcast(rawTxHex)
+        } finally {
+            client.close()
+        }
+    }
+
+    /** A rough sats/vByte estimate from the server, floored by the relay minimum. Null if it fails. */
+    suspend fun suggestedFeeRate(endpoint: NodeEndpoint, pinnedFingerprint: String?): Double? {
+        val client = ElectrumClient(endpoint, pinnedFingerprint)
+        return try {
+            client.connect()
+            val perKb = client.estimateFeePerKb(3)
+            val relayPerKb = client.relayFeePerKb()
+            val rate = maxOf(perKb, relayPerKb) // BTC/kB
+            if (rate <= 0) null else (rate * 100_000.0) // → sats/vByte
+        } catch (e: Exception) {
+            null
         } finally {
             client.close()
         }

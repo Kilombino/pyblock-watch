@@ -30,6 +30,26 @@ sealed interface ScanPhase {
     data class Error(val message: String) : ScanPhase
 }
 
+/** A prepared, not-yet-signed spend: the coins chosen, the fee, and the outputs. */
+data class SendDraft(
+    val toAddress: String,
+    val amount: Long,
+    val fee: Long,
+    val change: Long,
+    val inputs: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>,
+    val outputs: List<com.kilombino.pyblockwatch.crypto.TxBuilder.Output>,
+)
+
+/** Where the send flow is, so the UI can move from editing → review → broadcast → done. */
+sealed interface SendPhase {
+    data object Editing : SendPhase
+    data object Preparing : SendPhase
+    data class Review(val draft: SendDraft) : SendPhase
+    data object Broadcasting : SendPhase
+    data class Sent(val txid: String) : SendPhase
+    data class Failed(val message: String) : SendPhase
+}
+
 data class ChainState(
     val phase: ScanPhase = ScanPhase.Idle,
     val rows: List<AddressRow> = emptyList(),
@@ -56,6 +76,8 @@ data class UiState(
     val gapLimit: Int = 20,
     val secondsUntilRefresh: Int = 30,
     val inputError: String? = null,
+    val isHot: Boolean = false,
+    val sendPhase: SendPhase = SendPhase.Editing,
 ) {
     val current: ChainState get() = chains[selected] ?: ChainState()
     val hasWallet: Boolean get() = !xpub.isNullOrBlank()
@@ -66,8 +88,16 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
     private val scanner = Scanner()
     private val notifier = Notifier(app)
+    private val seedVault = com.kilombino.pyblockwatch.data.SeedVault(app)
     private val jobs = mutableMapOf<Chain, Job>()
     private var refreshJob: Job? = null
+
+    /** True when this wallet holds an encrypted seed and can therefore sign/spend. */
+    fun hasSeed(): Boolean = seedVault.hasSeed()
+    /** A Keystore cipher to encrypt the seed; authorise it with BiometricPrompt first. */
+    fun seedEncryptCipher() = seedVault.encryptCipher()
+    /** A Keystore cipher to decrypt the seed; authorise it with BiometricPrompt first. */
+    fun seedDecryptCipher() = seedVault.decryptCipher()
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -82,6 +112,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 selected = store.lastChain,
                 notificationsEnabled = store.notificationsEnabled,
                 gapLimit = store.gapLimit,
+                isHot = seedVault.hasSeed(),
             )
         }
         if (xpub != null) Chain.entries.forEach { scan(it) }
@@ -145,7 +176,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         if (type == null) {
             // Re-derive the real reason so the user sees something actionable.
             val why = runCatching { com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(trimmed) }
-                .exceptionOrNull()?.message ?: "No se reconoce como xpub, ypub o zpub."
+                .exceptionOrNull()?.message ?: "Not recognised as an xpub, ypub or zpub."
             _state.update { it.copy(inputError = why) }
             return
         }
@@ -201,6 +232,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     fun forget() {
         jobs.values.forEach(Job::cancel); jobs.clear()
         store.clearWallet()
+        seedVault.clear()
         _state.value = UiState(notificationsEnabled = store.notificationsEnabled)
     }
 
@@ -278,6 +310,153 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ------------------------------------------------------------------ hot wallet: create
+
+    /**
+     * Turn a freshly generated (or restored) mnemonic into a wallet: persist it encrypted
+     * behind the just-authorised [encryptCipher], derive the account zpub, and hand that to
+     * the same scanner a watch-only xpub uses. Native SegWit (BIP-84) by default.
+     */
+    fun createHotWallet(mnemonic: List<String>, encryptCipher: javax.crypto.Cipher, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                seedVault.store(encryptCipher, mnemonic)
+                val zpub = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val master = com.kilombino.pyblockwatch.crypto.Bip32Priv
+                        .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(mnemonic))
+                    com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 84, account = 0)
+                }
+                store.xpub = zpub
+                store.label = "Hot wallet"
+                store.scriptType = ScriptType.P2WPKH
+                _state.update {
+                    it.copy(
+                        xpub = zpub, label = "Hot wallet", scriptType = ScriptType.P2WPKH,
+                        isHot = true, inputError = null,
+                        chains = Chain.entries.associateWith { ChainState() },
+                    )
+                }
+                Chain.entries.forEach { scan(it) }
+            }.onFailure { e ->
+                seedVault.clear()
+                onError(e.message ?: "Could not create the wallet.")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ hot wallet: send
+
+    fun resetSend() = _state.update { it.copy(sendPhase = SendPhase.Editing) }
+
+    /**
+     * Choose coins and compute the fee for a spend, WITHOUT touching the seed — this stage is
+     * all public data, so it can be reviewed before any biometric prompt. Produces a
+     * [SendDraft] the UI shows for confirmation.
+     */
+    fun prepareSend(toAddress: String, amountSats: Long, feeRatePerVb: Double) {
+        val chain = _state.value.selected
+        val cs = _state.value.chains[chain] ?: return
+        val xpub = _state.value.xpub ?: return
+        _state.update { it.copy(sendPhase = SendPhase.Preparing) }
+        viewModelScope.launch {
+            runCatching {
+                val toScript = com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(toAddress)
+                require(amountSats > 0) { "Enter an amount." }
+                val rate = feeRatePerVb.coerceAtLeast(1.0)
+                val endpoint = store.endpoint(chain)
+                val pin = store.pinnedFingerprint(endpoint)
+                val utxos = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, pin)
+                }
+                require(utxos.isNotEmpty()) { "No spendable coins on this chain yet." }
+
+                // Largest-first selection until the inputs cover amount + fee.
+                val sorted = utxos.sortedByDescending { it.value }
+                val chosen = mutableListOf<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>()
+                var sum = 0L
+                for (u in sorted) {
+                    chosen += u; sum += u.value
+                    if (sum >= amountSats + estimateFee(chosen.size, 2, rate)) break
+                }
+                var fee = estimateFee(chosen.size, 2, rate)
+                require(sum >= amountSats + fee) { "Not enough funds for the amount plus fee." }
+                var change = sum - amountSats - fee
+
+                val outputs = mutableListOf(
+                    com.kilombino.pyblockwatch.crypto.TxBuilder.Output(toScript, amountSats),
+                )
+                if (change > DUST_SATS) {
+                    val changeScript = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        changeScriptPubKey(xpub, nextChangeIndex(cs.rows))
+                    }
+                    outputs += com.kilombino.pyblockwatch.crypto.TxBuilder.Output(changeScript, change)
+                } else {
+                    // Change too small to be worth an output: fold it into the fee.
+                    fee = sum - amountSats
+                    change = 0
+                }
+                val draft = SendDraft(toAddress, amountSats, fee, change, chosen, outputs)
+                _state.update { it.copy(sendPhase = SendPhase.Review(draft)) }
+            }.onFailure { e ->
+                _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the send.")) }
+            }
+        }
+    }
+
+    /**
+     * Sign the reviewed draft with keys derived from the seed (unlocked by the just-authorised
+     * [decryptCipher]) and broadcast it. The seed is read, used and dropped inside this call.
+     */
+    fun confirmSend(decryptCipher: javax.crypto.Cipher) {
+        val draft = (_state.value.sendPhase as? SendPhase.Review)?.draft ?: return
+        val chain = _state.value.selected
+        _state.update { it.copy(sendPhase = SendPhase.Broadcasting) }
+        viewModelScope.launch {
+            runCatching {
+                val purpose = Scanner.purposeFor(store.scriptType)
+                val signed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val mnemonic = seedVault.reveal(decryptCipher)
+                    val master = com.kilombino.pyblockwatch.crypto.Bip32Priv
+                        .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(mnemonic))
+                    val inputs = draft.inputs.map { u ->
+                        val node = com.kilombino.pyblockwatch.crypto.Bip32Priv
+                            .derivePath(master, "m/$purpose'/0'/0'/${u.chainIndex}/${u.index}")
+                        com.kilombino.pyblockwatch.crypto.TxBuilder.Input(
+                            u.txid, u.vout, u.value, node.key, node.publicKey(),
+                        )
+                    }
+                    com.kilombino.pyblockwatch.crypto.TxBuilder.build(inputs, draft.outputs)
+                }
+                val endpoint = store.endpoint(chain)
+                val pin = store.pinnedFingerprint(endpoint)
+                val txid = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    scanner.broadcast(signed.rawHex, endpoint, pin)
+                }
+                _state.update { it.copy(sendPhase = SendPhase.Sent(txid)) }
+                refresh(chain)
+            }.onFailure { e ->
+                _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "The broadcast failed.")) }
+            }
+        }
+    }
+
+    /** Roughly a P2WPKH transaction's vbytes → fee in sats, rounded up. */
+    private fun estimateFee(nIn: Int, nOut: Int, ratePerVb: Double): Long {
+        val vbytes = 11.0 + 68.0 * nIn + 31.0 * nOut // overhead + inputs + outputs (segwit)
+        return kotlin.math.ceil(vbytes * ratePerVb).toLong()
+    }
+
+    /** The next unused change index, so a spend's change goes to a fresh address. */
+    private fun nextChangeIndex(rows: List<AddressRow>): Int =
+        (rows.filter { it.chainIndex == 1 }.maxOfOrNull { it.index }?.plus(1)) ?: 0
+
+    /** The change output's scriptPubKey, derived publicly from the account xpub (no seed needed). */
+    private fun changeScriptPubKey(xpub: String, index: Int): ByteArray {
+        val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
+        val pub = com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, 1, index).pubkey()
+        return com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(pub, store.scriptType)
+    }
+
     private fun update(chain: Chain, f: (ChainState) -> ChainState) {
         _state.update { s ->
             s.copy(chains = s.chains + (chain to f(s.chains[chain] ?: ChainState())))
@@ -287,5 +466,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         /** Foreground auto-refresh cadence, and the countdown the UI shows. */
         const val REFRESH_SECONDS = 30
+        /** Below this, a change output costs more to spend later than it is worth — fold it into fee. */
+        const val DUST_SATS = 294L
     }
 }
