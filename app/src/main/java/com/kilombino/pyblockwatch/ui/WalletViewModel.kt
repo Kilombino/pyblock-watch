@@ -78,9 +78,12 @@ data class UiState(
     val inputError: String? = null,
     val isHot: Boolean = false,
     val sendPhase: SendPhase = SendPhase.Editing,
+    val setupMode: Boolean = false,
 ) {
     val current: ChainState get() = chains[selected] ?: ChainState()
     val hasWallet: Boolean get() = !xpub.isNullOrBlank()
+    /** Show the wallet only when one exists AND the user is not in the middle of setup. */
+    val showWallet: Boolean get() = hasWallet && !setupMode
 }
 
 class WalletViewModel(app: Application) : AndroidViewModel(app) {
@@ -193,6 +196,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 xpub = trimmed, label = label, scriptType = chosen, inputError = null,
+                isHot = false, setupMode = false,
                 chains = Chain.entries.associateWith { ChainState() },
             )
         }
@@ -221,6 +225,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearError() = _state.update { it.copy(inputError = null) }
+
+    /** Open the wallet chooser (dice / restore / watch-only) even when a wallet already exists. */
+    fun startSetup() = _state.update { it.copy(setupMode = true, inputError = null) }
+    /** Leave the chooser without changing anything, back to the existing wallet. */
+    fun endSetup() = _state.update { it.copy(setupMode = false) }
 
     fun select(chain: Chain) {
         store.lastChain = chain
@@ -332,7 +341,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update {
                     it.copy(
                         xpub = zpub, label = "Hot wallet", scriptType = ScriptType.P2WPKH,
-                        isHot = true, inputError = null,
+                        isHot = true, inputError = null, setupMode = false,
                         chains = Chain.entries.associateWith { ChainState() },
                     )
                 }

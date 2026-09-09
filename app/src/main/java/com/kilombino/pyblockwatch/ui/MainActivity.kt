@@ -82,7 +82,7 @@ class MainActivity : FragmentActivity() {
                     if (state.hasWallet && state.notificationsEnabled) toggleNotifications(vm, true)
                 }
                 Box(Modifier.fillMaxSize().background(Ink)) {
-                    if (state.hasWallet) {
+                    if (state.showWallet) {
                         WalletScreen(
                             state = state, vm = vm,
                             onToggleNotifications = { on -> toggleNotifications(vm, on) },
@@ -142,8 +142,17 @@ private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(40.dp))
+        if (state.hasWallet) {
+            TextButton(onClick = { vm.endSetup() }) {
+                Text("← back to wallet", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Text("Kilombino", style = MaterialTheme.typography.displayLarge, color = Purple)
         Text("BITCOIN-BLAKE2b WALLET", style = MaterialTheme.typography.titleLarge, color = TextSoft)
+        if (state.hasWallet) {
+            Explain("Creating or importing a wallet here REPLACES the current one. Your coins are " +
+                "safe on-chain; make sure you still have this wallet's backup before switching.")
+        }
 
         Panel(accent = Purple) {
             SectionLabel("A spending wallet")
@@ -570,6 +579,13 @@ private fun SettingsPanel(
                 style = MaterialTheme.typography.bodySmall, color = TextFaint,
             )
         }
+        Spacer(Modifier.height(6.dp))
+        Button(
+            onClick = { vm.startSetup() },
+            colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
+            shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (state.isHot) "SWITCH / NEW WALLET" else "CREATE A SPENDING WALLET",
+                 style = MaterialTheme.typography.titleMedium) }
         TextButton(onClick = onForget) {
             Text("forget this wallet", color = Bad, style = MaterialTheme.typography.bodySmall)
         }
