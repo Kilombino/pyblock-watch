@@ -1,8 +1,8 @@
-# PyBLØCK Watch
+# Kilombino Bitcoin-Blake2b wallet
 
-A watch-only Bitcoin wallet for Android that looks at **both sides of the BLAKE2b fork
-at once**. You give it an extended *public* key; it shows what that key holds on the
-BLAKE2b chain and on the classic SHA-256 chain, side by side.
+A Bitcoin wallet for Android for **both sides of the BLAKE2b fork at once**. Watch any
+extended *public* key across the BLAKE2b chain and the classic SHA-256 chain side by
+side, or create a spending wallet whose seed is generated on-device and never leaves it.
 
 Built for GrapheneOS: no Google Play Services, no push server, no analytics, no
 account. Apache-2.0, reproducible, and every line of cryptography is in this repo.
@@ -11,8 +11,10 @@ account. Apache-2.0, reproducible, and every line of cryptography is in this rep
 
 ## What it does
 
-- **Watch-only, by construction.** There is no signing code anywhere in this app.
-  It cannot spend, so an xpub is all it ever asks for and all it could ever leak.
+- **Watch or spend.** Import an xpub to watch read-only, or create a spending (hot)
+  wallet: its seed is generated on the phone — roll physical dice, SeedSigner-style, or
+  use the secure RNG — and stored encrypted behind an Android Keystore key that needs
+  your fingerprint or device PIN to sign. Native SegWit (bc1q) by default.
 - **Both chains, one key.** BLAKE2b and SHA-256 share a genesis block and Bitcoin's
   whole address scheme — the fork changed the proof-of-work, not key derivation — so
   the same xpub is meaningful on both, and the balances diverge at the fork.
@@ -42,10 +44,12 @@ offer a custom node. The BLAKE2b side does.
 
 ## Security posture
 
-**This app holds no secrets.** That is the whole design, and several decisions follow
-from it:
+**A watch-only wallet holds no secrets; a hot wallet holds exactly one.** Several
+decisions follow:
 
-- No signing code, so an xpub cannot be turned into a spend.
+- In watch-only mode there is no key to leak. In hot mode the only secret is the seed,
+  encrypted with an Android Keystore key created with `setUserAuthenticationRequired(true)`
+  — the fingerprint/PIN is bound to the decryption cipher, not a screen the app could skip.
 - The xpub lives in ordinary app-private storage, not `EncryptedSharedPreferences`.
   Encrypting a non-secret would buy nothing but a dependency on
   `androidx.security:security-crypto`, which is both an alpha and deprecated.
@@ -60,7 +64,7 @@ secp256k1 JNI. All of it is Kotlin in `app/src/main/java/.../crypto/`:
 
 | Piece | Why it is in-tree |
 |---|---|
-| `Secp256k1.kt` | Public-key arithmetic only (BIP-32 CKDpub). No private keys, no signing, no nonces — so the classic ECDSA footguns do not apply, and a bug produces a wrong address rather than a stolen key. |
+| `Secp256k1.kt` | secp256k1 curve arithmetic. `Ecdsa.kt` adds signing with RFC-6979 deterministic nonces (no reused/biased `k`), low-S, DER — pinned to the BIP-143 worked example so a wrong signature can never ship. Watch-only mode still touches only the public half. |
 | `Ripemd160.kt` | Android ships no RIPEMD-160, and HASH160 needs it. ~120 lines of fully specified, deterministic code with published vectors. |
 | `Base58.kt`, `Bech32.kt` | Small, exactly specified encodings. |
 | `Bip32.kt` | Public derivation only — there is deliberately no CKDpriv. |

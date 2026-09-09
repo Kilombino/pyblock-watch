@@ -56,14 +56,14 @@ A keystore is only needed to *sign*. The unsigned APK is what you compare.
 
 ## 5. Verified result
 
-Version **0.6.0** (versionCode 6):
+Version **0.7.0** (versionCode 7):
 
 ```
 app-release-unsigned.apk
-SHA-256  06725332267d8feb1413054d50057ad4337258ca8b3213fade88f4498f716d6f
+SHA-256  f4651247543d54680210daeae9a8b1f4be7dc57c0b1b49bbb5aae64d376e45a3
 ```
 
-(0.5.0 was `5237b543ecd605f7884abb415b811c2753e01a1cf6c101c0b85b8fe172835eac`; 0.4.0 was `4a10be008fbce652bb7a9f596fae48b8b201a5aa3e4182a794454a2f007c53f3`; 0.3.0 was `1459eee0e7b61c7161a37d682310b5c766fef2b45cc9084e957654e28fa1d8b4`; 0.2.0 was `e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c`; 0.1.0 was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
+(0.6.0 was `06725332267d8feb1413054d50057ad4337258ca8b3213fade88f4498f716d6f`; 0.5.0 was `5237b543ecd605f7884abb415b811c2753e01a1cf6c101c0b85b8fe172835eac`; 0.4.0 was `4a10be008fbce652bb7a9f596fae48b8b201a5aa3e4182a794454a2f007c53f3`; 0.3.0 was `1459eee0e7b61c7161a37d682310b5c766fef2b45cc9084e957654e28fa1d8b4`; 0.2.0 was `e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c`; 0.1.0 was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
 
 Verified three ways, all producing that identical hash:
 
@@ -115,13 +115,13 @@ what every future version must keep:
 b8d7ad679fbfbe39f5640bce01d675347f52b27b7ae6f3731d2ad982c92ef135
 ```
 
-The signed v0.6.0 APK you download has SHA-256
-`0f06f65bc6907f1544695133a140f4fe86da5819fe71801d60efb7b017c9c50c`; the reproducible
-unsigned build (§5) is `06725332…`, and `apksigcopier` (§6) confirms the signed APK is
+The signed v0.7.0 APK you download has SHA-256
+`a270bf5a4014f20e3699e8fc5ecd86e8c1cc665f9268f675e5e22967f97a2c99`; the reproducible
+unsigned build (§5) is `f4651247…`, and `apksigcopier` (§6) confirms the signed APK is
 exactly that build plus this signature. It is signed with `--alignment-preserved`, so the
 signed file is the unsigned build plus only a signature block — no re-zipping — which is
 what lets a verifier's `apksigcopier copy` reproduce it byte for byte. The certificate is
 unchanged from 0.1.0 — the v3 lineage means the key is the same across versions.
 Distributed via
-[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.6.0) and
+[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.7.0) and
 Zapstore.
