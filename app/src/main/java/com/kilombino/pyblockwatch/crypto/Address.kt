@@ -16,6 +16,35 @@ object Address {
     private const val P2PKH_VERSION = 0x00
     private const val P2SH_VERSION = 0x05
 
+    /**
+     * The scriptPubKey a RECIPIENT address pays to — the inverse of [encode]. Accepts
+     * P2PKH (1…), P2SH (3…), and native SegWit / Taproot (bc1…). Throws with a readable
+     * message on anything malformed, since this string is pasted by a human before a send.
+     */
+    fun decodeToScriptPubKey(address: String): ByteArray {
+        val a = address.trim()
+        if (a.length > 3 && a.substring(0, 3).lowercase() == "bc1") {
+            val sw = Bech32.decodeSegwit(HRP_MAINNET, a)
+                ?: throw IllegalArgumentException("Not a valid bc1 address (checksum or format).")
+            val op = if (sw.witnessVersion == 0) 0x00 else (0x50 + sw.witnessVersion)
+            return byteArrayOf(op.toByte(), sw.program.size.toByte()) + sw.program
+        }
+        val raw = try {
+            Base58.decodeChecked(a)
+        } catch (e: IllegalArgumentException) {
+            throw IllegalArgumentException("Not a valid address: ${e.message}")
+        }
+        require(raw.size == 21) { "Unexpected address payload length." }
+        val version = raw[0].toInt() and 0xFF
+        val h = raw.copyOfRange(1, 21)
+        return when (version) {
+            P2PKH_VERSION ->
+                byteArrayOf(0x76, 0xa9.toByte(), 0x14) + h + byteArrayOf(0x88.toByte(), 0xac.toByte())
+            P2SH_VERSION -> byteArrayOf(0xa9.toByte(), 0x14) + h + byteArrayOf(0x87.toByte())
+            else -> throw IllegalArgumentException("Unknown address version byte 0x%02x.".format(version))
+        }
+    }
+
     /** The scriptPubKey a given public key locks coins to, under [type]. */
     fun scriptPubKey(pubkey: ByteArray, type: ScriptType): ByteArray {
         val h160 = Hashes.hash160(pubkey)

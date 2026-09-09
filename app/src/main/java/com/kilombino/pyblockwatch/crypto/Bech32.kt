@@ -71,4 +71,34 @@ object Bech32 {
         for (v in payload + checksum) sb.append(CHARSET[v])
         return sb.toString()
     }
+
+    data class Segwit(val witnessVersion: Int, val program: ByteArray)
+
+    /**
+     * Decode a SegWit address under [hrp] (e.g. "bc"). Returns null on any malformed input —
+     * bad checksum, mixed case, wrong witness-version/length, or a v0 program that is not
+     * 20 or 32 bytes. Used to turn a recipient's `bc1…` into a scriptPubKey.
+     */
+    fun decodeSegwit(hrp: String, addr: String): Segwit? {
+        if (addr != addr.lowercase() && addr != addr.uppercase()) return null // no mixed case
+        val a = addr.lowercase()
+        val pos = a.lastIndexOf('1')
+        if (pos < 1 || pos + 7 > a.length || a.substring(0, pos) != hrp) return null
+        val dataPart = a.substring(pos + 1)
+        val values = IntArray(dataPart.length)
+        for (i in dataPart.indices) {
+            val idx = CHARSET.indexOf(dataPart[i])
+            if (idx < 0) return null
+            values[i] = idx
+        }
+        if (values.size < 7) return null
+        val witnessVersion = values[0]
+        if (witnessVersion < 0 || witnessVersion > 16) return null
+        val expected = if (witnessVersion == 0) BECH32_CONST else BECH32M_CONST
+        if (polymod(hrpExpand(hrp) + values) != expected) return null
+        val program = convertBits(values.copyOfRange(1, values.size - 6), 5, 8, false) ?: return null
+        if (program.size < 2 || program.size > 40) return null
+        if (witnessVersion == 0 && program.size != 20 && program.size != 32) return null
+        return Segwit(witnessVersion, ByteArray(program.size) { program[it].toByte() })
+    }
 }

@@ -4,10 +4,10 @@ import java.math.BigInteger
 
 /** Which script type an extended public key implies, per SLIP-132 version bytes. */
 enum class ScriptType(val label: String, val explain: String) {
-    P2PKH("Legacy", "Direcciones que empiezan por 1. El formato original de Bitcoin."),
-    P2SH_P2WPKH("SegWit anidado", "Direcciones que empiezan por 3. SegWit envuelto para monederos antiguos."),
-    P2WPKH("SegWit nativo", "Direcciones que empiezan por bc1q. Las más baratas de gastar."),
-    P2TR("Taproot", "Direcciones que empiezan por bc1p. Lo más nuevo y privado."),
+    P2PKH("Legacy", "Addresses that start with 1. Bitcoin's original format."),
+    P2SH_P2WPKH("Nested SegWit", "Addresses that start with 3. SegWit wrapped for older wallets."),
+    P2WPKH("Native SegWit", "Addresses that start with bc1q. The cheapest to spend."),
+    P2TR("Taproot", "Addresses that start with bc1p. The newest and most private."),
 }
 
 /**
@@ -49,22 +49,22 @@ object Bip32 {
         val raw = try {
             Base58.decodeChecked(encoded.trim())
         } catch (e: IllegalArgumentException) {
-            throw IllegalArgumentException("No es una clave extendida válida: ${e.message}")
+            throw IllegalArgumentException("Not a valid extended key: ${e.message}")
         }
-        require(raw.size == 78) { "Longitud inesperada (${raw.size} bytes, se esperaban 78)." }
+        require(raw.size == 78) { "Unexpected length (${raw.size} bytes, expected 78)." }
 
         val version = ((raw[0].toInt() and 0xFF) shl 24) or ((raw[1].toInt() and 0xFF) shl 16) or
             ((raw[2].toInt() and 0xFF) shl 8) or (raw[3].toInt() and 0xFF)
         val scriptType = VERSIONS[version]
             ?: throw IllegalArgumentException(
-                "Prefijo desconocido. Usa xpub, ypub o zpub (no una clave privada xprv)."
+                "Unknown prefix. Use xpub, ypub or zpub (not an xprv private key)."
             )
 
         val depth = raw[4].toInt() and 0xFF
         val chainCode = raw.copyOfRange(13, 45)
         val keyBytes = raw.copyOfRange(45, 78)
         require(keyBytes[0].toInt() == 0x02 || keyBytes[0].toInt() == 0x03) {
-            "Esto parece una clave PRIVADA extendida. Nunca la introduzcas aquí: usa la pública (xpub/ypub/zpub)."
+            "This looks like an extended PRIVATE key. Never enter it here: use the public one (xpub/ypub/zpub)."
         }
         return ExtendedPubKey(Secp256k1.decompress(keyBytes), chainCode, depth, scriptType)
     }

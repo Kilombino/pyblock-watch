@@ -34,6 +34,13 @@ object Hashes {
         return mac.doFinal(data)
     }
 
+    /** HMAC-SHA256 — the PRF that drives RFC 6979 deterministic ECDSA nonces. */
+    fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        return mac.doFinal(data)
+    }
+
     fun ByteArray.toHex(): String {
         val sb = StringBuilder(size * 2)
         for (b in this) sb.append("%02x".format(b.toInt() and 0xFF))
