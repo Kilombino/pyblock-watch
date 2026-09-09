@@ -92,9 +92,9 @@ class Store(context: Context) {
 
     /**
      * The set of wallet transactions currently sitting in the mempool, each mapped to the
-     * sats it moved (signed: + received, − sent). Tracked so the watcher can say "nuevo
-     * envío en la mempool: N sats" the moment it appears, and later "primera confirmación
-     * del envío de N sats" when that same txid gets its first confirmation — the amount is
+     * sats it moved (signed: + received, − sent). Tracked so the watcher can say "new
+     * outgoing payment in the mempool: N sats" the moment it appears, and later "first
+     * confirmation of the outgoing payment of N sats" when that txid first confirms — the amount is
      * remembered from when it entered the mempool, because a confirmation is balance-neutral
      * (it only moves sats from unconfirmed to confirmed) and carries no delta of its own.
      */

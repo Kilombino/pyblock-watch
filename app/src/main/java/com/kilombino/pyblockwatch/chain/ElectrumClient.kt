@@ -93,7 +93,7 @@ class ElectrumClient(
         try {
             ssl.startHandshake()
         } catch (e: Exception) {
-            throw ElectrumException("No se pudo establecer TLS con ${endpoint}: ${e.message}", e)
+            throw ElectrumException("Could not establish TLS with ${endpoint}: ${e.message}", e)
         }
         socket = ssl
         reader = BufferedReader(InputStreamReader(ssl.inputStream, Charsets.UTF_8))
@@ -115,7 +115,7 @@ class ElectrumClient(
         val addresses = try {
             InetAddress.getAllByName(endpoint.host)
         } catch (e: Exception) {
-            throw ElectrumException("No se pudo resolver ${endpoint.host}: ${e.message}", e)
+            throw ElectrumException("Could not resolve ${endpoint.host}: ${e.message}", e)
         }
         // IPv4 first: when IPv6 is advertised but unroutable, this avoids a stall.
         val ordered = addresses.sortedBy { it.address.size }
@@ -131,14 +131,14 @@ class ElectrumClient(
                 last = e
             }
         }
-        throw ElectrumException("No se pudo conectar con $endpoint: ${last?.message}", last)
+        throw ElectrumException("Could not connect to $endpoint: ${last?.message}", last)
     }
 
     /** One JSON-RPC round trip. Requests are newline-delimited. */
     @Synchronized
     private fun call(method: String, params: JSONArray): Any? {
-        val w = writer ?: throw ElectrumException("cliente no conectado")
-        val r = reader ?: throw ElectrumException("cliente no conectado")
+        val w = writer ?: throw ElectrumException("client not connected")
+        val r = reader ?: throw ElectrumException("client not connected")
         val id = nextId++
         val req = JSONObject()
             .put("jsonrpc", "2.0")   // Frigate rejects the request without this.
@@ -148,7 +148,7 @@ class ElectrumClient(
         try {
             w.write(req.toString()); w.write("\n"); w.flush()
         } catch (e: Exception) {
-            throw ElectrumException("Se perdió la conexión al enviar $method: ${e.message}", e)
+            throw ElectrumException("Lost the connection while sending $method: ${e.message}", e)
         }
 
         // Skip any subscription notification that arrives before our reply.
@@ -156,8 +156,8 @@ class ElectrumClient(
             val line = try {
                 r.readLine()
             } catch (e: Exception) {
-                throw ElectrumException("Se perdió la conexión esperando $method: ${e.message}", e)
-            } ?: throw ElectrumException("El servidor cerró la conexión durante $method")
+                throw ElectrumException("Lost the connection while waiting for $method: ${e.message}", e)
+            } ?: throw ElectrumException("The server closed the connection during $method")
 
             val obj = try { JSONObject(line) } catch (e: Exception) { continue }
             if (obj.has("error") && !obj.isNull("error")) {
@@ -170,13 +170,13 @@ class ElectrumClient(
 
     fun blockHeight(): Int {
         val r = call("blockchain.headers.subscribe", JSONArray()) as? JSONObject
-            ?: throw ElectrumException("respuesta inesperada de headers.subscribe")
+            ?: throw ElectrumException("unexpected response from headers.subscribe")
         return r.getInt("height")
     }
 
     fun balance(scriptHash: String): ScriptHashBalance {
         val r = call("blockchain.scripthash.get_balance", JSONArray().put(scriptHash)) as? JSONObject
-            ?: throw ElectrumException("respuesta inesperada de get_balance")
+            ?: throw ElectrumException("unexpected response from get_balance")
         return ScriptHashBalance(r.optLong("confirmed"), r.optLong("unconfirmed"))
     }
 
@@ -197,6 +197,45 @@ class ElectrumClient(
     fun historyCount(scriptHash: String): Int {
         val r = call("blockchain.scripthash.get_history", JSONArray().put(scriptHash)) as? JSONArray
         return r?.length() ?: 0
+    }
+
+    /** One spendable output under a scripthash. `height <= 0` means it is still unconfirmed. */
+    data class Utxo(val txid: String, val vout: Int, val value: Long, val height: Int)
+
+    /** The unspent outputs a scripthash controls — the coins a send can draw on. */
+    fun listUnspent(scriptHash: String): List<Utxo> {
+        val r = call("blockchain.scripthash.listunspent", JSONArray().put(scriptHash)) as? JSONArray
+            ?: return emptyList()
+        return (0 until r.length()).map {
+            val o = r.getJSONObject(it)
+            Utxo(o.optString("tx_hash"), o.optInt("tx_pos"), o.optLong("value"), o.optInt("height"))
+        }
+    }
+
+    /**
+     * Estimated fee to confirm within [blocks], in BTC per kilobyte. The server returns -1
+     * when it has no estimate (common on a young, quiet chain), which the caller floors with
+     * [relayFee]. Multiply by 1e5 to get sats/vByte.
+     */
+    fun estimateFeePerKb(blocks: Int): Double {
+        val r = call("blockchain.estimatefee", JSONArray().put(blocks))
+        return (r as? Number)?.toDouble() ?: -1.0
+    }
+
+    /** The server's minimum relay fee, in BTC per kilobyte — the floor a transaction must clear. */
+    fun relayFeePerKb(): Double {
+        val r = call("blockchain.relayfee", JSONArray())
+        return (r as? Number)?.toDouble() ?: 0.0
+    }
+
+    /** Broadcast a raw (hex) transaction. Returns the txid, or throws with the server's reason. */
+    fun broadcast(rawTxHex: String): String {
+        val r = call("blockchain.transaction.broadcast", JSONArray().put(rawTxHex))
+        val txid = r?.toString()
+        if (txid == null || txid.length != 64) {
+            throw ElectrumException("The server rejected the transaction: $txid")
+        }
+        return txid
     }
 
     fun close() {

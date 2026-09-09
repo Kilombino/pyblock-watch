@@ -68,36 +68,36 @@ class Notifier(private val context: Context) {
     fun found(chain: Chain, confirmed: Long, unconfirmed: Long) {
         val total = confirmed + unconfirmed
         val text = if (unconfirmed != 0L)
-            "${sats(total)} sats · ${sats(unconfirmed)} en la mempool (0 conf)"
-        else "${sats(confirmed)} sats · confirmado"
-        post(idFor(chain, "found", ""), "${chain.display}: saldo detectado", text)
+            "${sats(total)} sats · ${sats(unconfirmed)} in the mempool (0 conf)"
+        else "${sats(confirmed)} sats · confirmed"
+        post(idFor(chain, "found", ""), "${chain.display}: balance detected", text)
     }
 
     fun mempoolIn(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "mem", txid), "Nuevo ingreso en la mempool",
+        post(idFor(chain, "mem", txid), "New incoming payment in the mempool",
              "${chain.display} · +${sats(amount)} sats (0 conf)")
 
     fun mempoolOut(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "mem", txid), "Nuevo envío en la mempool",
+        post(idFor(chain, "mem", txid), "New outgoing payment in the mempool",
              "${chain.display} · ${sats(amount)} sats (0 conf)")
 
     fun firstConfIn(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "conf", txid), "Primera confirmación del ingreso",
+        post(idFor(chain, "conf", txid), "First confirmation of the incoming payment",
              "${chain.display} · +${sats(amount)} sats (1 conf)")
 
     fun firstConfOut(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "conf", txid), "Primera confirmación del envío",
+        post(idFor(chain, "conf", txid), "First confirmation of the outgoing payment",
              "${chain.display} · ${sats(amount)} sats (1 conf)")
 
     // A change we only ever saw already-confirmed (received or spent between two checks,
     // never observed in the mempool). No txid to key on, so it collapses per chain.
     fun receivedConfirmed(chain: Chain, amount: Long) =
-        post(idFor(chain, "recv", ""), "Recibido",
-             "${chain.display} · +${sats(amount)} sats · confirmado")
+        post(idFor(chain, "recv", ""), "Received",
+             "${chain.display} · +${sats(amount)} sats · confirmed")
 
     fun sentConfirmed(chain: Chain, amount: Long) =
-        post(idFor(chain, "sent", ""), "Enviado",
-             "${chain.display} · ${sats(amount)} sats · confirmado")
+        post(idFor(chain, "sent", ""), "Sent",
+             "${chain.display} · ${sats(amount)} sats · confirmed")
 
     private fun idFor(chain: Chain, phase: String, txid: String): Int =
         (chain.id + phase + txid).hashCode()

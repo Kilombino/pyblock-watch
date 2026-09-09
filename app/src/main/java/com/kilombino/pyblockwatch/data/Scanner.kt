@@ -74,7 +74,7 @@ class Scanner(
         val parsed = try {
             Bip32.parseExtendedPubKey(xpub)
         } catch (e: IllegalArgumentException) {
-            emit(ScanEvent.Failed(e.message ?: "Clave extendida inválida")); return@flow
+            emit(ScanEvent.Failed(e.message ?: "Invalid extended key")); return@flow
         }
 
         emit(ScanEvent.Connecting(endpoint))

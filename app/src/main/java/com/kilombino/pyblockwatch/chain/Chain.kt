@@ -28,7 +28,7 @@ enum class Chain(
         defaultHost = "fulcrum.kilombino.com",
         defaultPort = 17717,
         accent = 0xFFB96BFF,
-        blurb = "La bifurcación con prueba de trabajo BLAKE2b. Cabeceras de 164 bytes.",
+        blurb = "The BLAKE2b proof-of-work fork. 164-byte headers.",
     ),
     SHA256(
         id = "sha256",
@@ -37,7 +37,7 @@ enum class Chain(
         defaultHost = "nobip110fulcrum.kilombino.com",
         defaultPort = 50002,
         accent = 0xFFF7931A,
-        blurb = "La cadena SHA-256 clásica. Solo lectura: busca tus monedas con la xpub.",
+        blurb = "The classic SHA-256 chain. Read-only: find your coins with the xpub.",
     );
 
     /** Only BLAKE2b offers pointing at your own node; SHA-256 is a lookup service. */
