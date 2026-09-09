@@ -274,6 +274,13 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
                 ) { Text("SEND", style = MaterialTheme.typography.titleMedium) }
             }
+        } else {
+            // Watch-only: a visible way to turn this into a spending wallet, not buried in settings.
+            Button(
+                onClick = { vm.startSetup() },
+                colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
+                shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
+            ) { Text("＋  CREATE A SPENDING WALLET", style = MaterialTheme.typography.titleMedium) }
         }
 
         ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
