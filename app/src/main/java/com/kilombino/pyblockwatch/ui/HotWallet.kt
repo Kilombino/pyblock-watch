@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -19,6 +21,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -279,6 +284,8 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
     var to by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var feeRate by remember { mutableStateOf("2") }
+    var coinControl by remember { mutableStateOf(false) }
+    val selectedOutpoints = remember { androidx.compose.runtime.mutableStateListOf<String>() }
 
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -366,16 +373,72 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                 }
+                Text("fee 0.1–1000 sat/vB", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+
+                // Coin control: pick exactly which UTXOs to spend, or leave off for auto-select.
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Coin control", color = TextMain, style = MaterialTheme.typography.bodyMedium,
+                         modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = coinControl,
+                        onCheckedChange = { coinControl = it; if (it) vm.loadUtxos() },
+                        colors = SwitchDefaults.colors(checkedThumbColor = accent),
+                    )
+                }
+                if (coinControl) {
+                    if (state.utxosLoading) {
+                        Text("loading coins…", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        val utxos = state.utxos ?: emptyList()
+                        if (utxos.isEmpty()) {
+                            Text("No spendable coins on this chain.", color = TextFaint,
+                                 style = MaterialTheme.typography.bodySmall)
+                        }
+                        utxos.forEach { u ->
+                            val key = "${u.txid}:${u.vout}"
+                            val sel = key in selectedOutpoints
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable { if (sel) selectedOutpoints.remove(key) else selectedOutpoints.add(key) }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(if (sel) "☑" else "☐", color = if (sel) accent else TextFaint,
+                                     modifier = Modifier.width(26.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("${groupSats(u.value)} sats",
+                                         color = if (sel) accent else TextMain,
+                                         style = MaterialTheme.typography.bodyMedium)
+                                    Text("${u.txid.take(8)}…:${u.vout} · m/…/${u.chainIndex}/${u.index}" +
+                                        (if (u.height <= 0) " · 0 conf" else ""),
+                                         color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                        if (selectedOutpoints.isNotEmpty()) {
+                            val selSum = utxos.filter { "${it.txid}:${it.vout}" in selectedOutpoints }.sumOf { it.value }
+                            Text("selected: ${groupSats(selSum)} sats", color = accent,
+                                 style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(10.dp))
                 Button(
                     onClick = {
+                        val sel = if (coinControl) {
+                            (state.utxos ?: emptyList()).filter { "${it.txid}:${it.vout}" in selectedOutpoints }
+                        } else emptyList()
                         vm.prepareSend(
                             to.trim(),
                             amount.toLongOrNull() ?: 0L,
                             feeRate.toDoubleOrNull() ?: 1.0,
+                            sel,
                         )
                     },
-                    enabled = to.isNotBlank() && (amount.toLongOrNull() ?: 0L) > 0,
+                    enabled = to.isNotBlank() && (amount.toLongOrNull() ?: 0L) > 0 &&
+                        (!coinControl || selectedOutpoints.isNotEmpty()),
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
                 ) { Text("REVIEW", style = MaterialTheme.typography.titleMedium) }
@@ -391,5 +454,89 @@ private fun RowLine(label: String, value: String, accent: Color) {
              modifier = Modifier.weight(1f))
         Text(value, color = accent, style = MaterialTheme.typography.bodyMedium,
              fontWeight = FontWeight.Bold)
+    }
+}
+
+// ------------------------------------------------------------------- receive + QR
+
+/** A QR of [text], rendered from ZXing (already in the app for scanning) — no new dependency. */
+@androidx.compose.runtime.Composable
+fun QrImage(text: String, sizeDp: Int) {
+    val bmp = androidx.compose.runtime.remember(text) {
+        val size = 512
+        val matrix = com.google.zxing.qrcode.QRCodeWriter()
+            .encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size)
+        val b = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        for (x in 0 until size) for (y in 0 until size) {
+            b.setPixel(x, y, if (matrix.get(x, y)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
+        }
+        b
+    }
+    androidx.compose.foundation.Image(
+        bitmap = bmp.asImageBitmap(),
+        contentDescription = "Address QR",
+        modifier = Modifier.size(sizeDp.dp),
+    )
+}
+
+/**
+ * Show a fresh, unused receive address and the exact derivation it came from. Works for any
+ * wallet (watch-only or hot) — the address is derived publicly from the xpub. "Next" walks
+ * forward so a user who wants a new address per payment can get one.
+ */
+@androidx.compose.runtime.Composable
+fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var index by remember { mutableStateOf(vm.nextReceiveIndex()) }
+    val pair = remember(index) { vm.receiveAddress(index) }
+
+    Panel(accent = accent) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("receive", accent)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onClose) {
+                Text("close", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (pair == null) {
+            Text("No wallet.", color = Bad, style = MaterialTheme.typography.bodySmall)
+        } else {
+            val (address, path) = pair
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(Color.White).padding(10.dp),
+                ) { QrImage(address, 200) }
+                Spacer(Modifier.height(10.dp))
+                SelectionContainer {
+                    Text(address, style = MaterialTheme.typography.bodyMedium,
+                         fontFamily = FontFamily.Monospace, color = TextMain)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text("unused · $path", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(address)) },
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                ) { Text("COPY", style = MaterialTheme.typography.titleMedium) }
+                Button(
+                    onClick = { index += 1 },
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                ) { Text("NEXT ADDRESS", style = MaterialTheme.typography.titleMedium) }
+            }
+            if (index > vm.nextReceiveIndex()) {
+                TextButton(onClick = { index = vm.nextReceiveIndex() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("back to first unused", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }

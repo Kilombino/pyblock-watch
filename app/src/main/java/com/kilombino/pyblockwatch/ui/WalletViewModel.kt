@@ -79,6 +79,8 @@ data class UiState(
     val isHot: Boolean = false,
     val sendPhase: SendPhase = SendPhase.Editing,
     val setupMode: Boolean = false,
+    val utxos: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>? = null, // null = not loaded
+    val utxosLoading: Boolean = false,
 ) {
     val current: ChainState get() = chains[selected] ?: ChainState()
     val hasWallet: Boolean get() = !xpub.isNullOrBlank()
@@ -355,14 +357,36 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------------ hot wallet: send
 
-    fun resetSend() = _state.update { it.copy(sendPhase = SendPhase.Editing) }
+    fun resetSend() = _state.update { it.copy(sendPhase = SendPhase.Editing, utxos = null) }
+
+    /** Load the wallet's spendable UTXOs for the coin-control picker. */
+    fun loadUtxos() {
+        val chain = _state.value.selected
+        val cs = _state.value.chains[chain] ?: return
+        if (_state.value.utxosLoading) return
+        _state.update { it.copy(utxosLoading = true) }
+        viewModelScope.launch {
+            runCatching {
+                val endpoint = store.endpoint(chain)
+                val pin = store.pinnedFingerprint(endpoint)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, pin)
+                }
+            }.onSuccess { u -> _state.update { it.copy(utxos = u.sortedByDescending { x -> x.value }, utxosLoading = false) } }
+             .onFailure { _state.update { it.copy(utxos = emptyList(), utxosLoading = false) } }
+        }
+    }
 
     /**
      * Choose coins and compute the fee for a spend, WITHOUT touching the seed — this stage is
-     * all public data, so it can be reviewed before any biometric prompt. Produces a
-     * [SendDraft] the UI shows for confirmation.
+     * all public data, so it can be reviewed before any biometric prompt. If [selected] is
+     * non-empty the user is doing coin control and exactly those inputs are used; otherwise the
+     * wallet auto-selects largest-first. [feeRatePerVb] is honoured across 0.1–1000 sat/vB.
      */
-    fun prepareSend(toAddress: String, amountSats: Long, feeRatePerVb: Double) {
+    fun prepareSend(
+        toAddress: String, amountSats: Long, feeRatePerVb: Double,
+        selected: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo> = emptyList(),
+    ) {
         val chain = _state.value.selected
         val cs = _state.value.chains[chain] ?: return
         val xpub = _state.value.xpub ?: return
@@ -371,24 +395,34 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 val toScript = com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(toAddress)
                 require(amountSats > 0) { "Enter an amount." }
-                val rate = feeRatePerVb.coerceAtLeast(1.0)
-                val endpoint = store.endpoint(chain)
-                val pin = store.pinnedFingerprint(endpoint)
-                val utxos = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, pin)
-                }
-                require(utxos.isNotEmpty()) { "No spendable coins on this chain yet." }
+                val rate = feeRatePerVb.coerceIn(0.1, 1000.0)
 
-                // Largest-first selection until the inputs cover amount + fee.
-                val sorted = utxos.sortedByDescending { it.value }
-                val chosen = mutableListOf<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>()
-                var sum = 0L
-                for (u in sorted) {
-                    chosen += u; sum += u.value
-                    if (sum >= amountSats + estimateFee(chosen.size, 2, rate)) break
+                val chosen: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>
+                var sum: Long
+                if (selected.isNotEmpty()) {
+                    chosen = selected
+                    sum = selected.sumOf { it.value }
+                } else {
+                    val endpoint = store.endpoint(chain)
+                    val pin = store.pinnedFingerprint(endpoint)
+                    val utxos = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, pin)
+                    }
+                    require(utxos.isNotEmpty()) { "No spendable coins on this chain yet." }
+                    val acc = mutableListOf<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>()
+                    var s = 0L
+                    for (u in utxos.sortedByDescending { it.value }) {
+                        acc += u; s += u.value
+                        if (s >= amountSats + estimateFee(acc.size, 2, rate)) break
+                    }
+                    chosen = acc; sum = s
                 }
+
                 var fee = estimateFee(chosen.size, 2, rate)
-                require(sum >= amountSats + fee) { "Not enough funds for the amount plus fee." }
+                require(sum >= amountSats + fee) {
+                    if (selected.isNotEmpty()) "The chosen coins don't cover the amount plus fee."
+                    else "Not enough funds for the amount plus fee."
+                }
                 var change = sum - amountSats - fee
 
                 val outputs = mutableListOf(
@@ -400,8 +434,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     outputs += com.kilombino.pyblockwatch.crypto.TxBuilder.Output(changeScript, change)
                 } else {
-                    // Change too small to be worth an output: fold it into the fee.
-                    fee = sum - amountSats
+                    fee = sum - amountSats // dust change folded into the fee
                     change = 0
                 }
                 val draft = SendDraft(toAddress, amountSats, fee, change, chosen, outputs)
@@ -410,6 +443,23 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the send.")) }
             }
         }
+    }
+
+    /** The next unused receive index for the current chain — one past the highest used. */
+    fun nextReceiveIndex(): Int {
+        val rows = _state.value.current.rows
+        return (rows.filter { it.chainIndex == 0 }.maxOfOrNull { it.index }?.plus(1)) ?: 0
+    }
+
+    /** Derive receive address [index] and its BIP-32 path, publicly from the xpub (no seed). */
+    fun receiveAddress(index: Int): Pair<String, String>? {
+        val xpub = _state.value.xpub ?: return null
+        return runCatching {
+            val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
+            val pub = com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, 0, index).pubkey()
+            val addr = com.kilombino.pyblockwatch.crypto.Address.encode(pub, store.scriptType)
+            addr to "m/${Scanner.purposeFor(store.scriptType)}'/0'/0'/0/$index"
+        }.getOrNull()
     }
 
     /**

@@ -239,6 +239,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     val accent by animateColorAsState(Color(chain.accent), tween(400), label = "accent")
     var showSettings by remember { mutableStateOf(false) }
     var showSend by remember { mutableStateOf(false) }
+    var showReceive by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -264,23 +265,33 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
 
         BalanceCard(chain, cs, accent, state.scriptType, state.secondsUntilRefresh)
 
-        if (state.isHot) {
-            if (showSend) {
-                SendSheet(vm, accent) { showSend = false }
-            } else {
-                Button(
-                    onClick = { vm.resetSend(); showSend = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
-                    shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
-                ) { Text("SEND", style = MaterialTheme.typography.titleMedium) }
+        when {
+            showSend -> SendSheet(vm, accent) { showSend = false }
+            showReceive -> ReceiveSheet(vm, accent) { showReceive = false }
+            else -> {
+                // Receive works for any wallet; Send only when a seed is present.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { showReceive = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
+                        shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                    ) { Text("RECEIVE", style = MaterialTheme.typography.titleMedium) }
+                    if (state.isHot) {
+                        Button(
+                            onClick = { vm.resetSend(); showSend = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
+                            shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                        ) { Text("SEND", style = MaterialTheme.typography.titleMedium) }
+                    }
+                }
+                if (!state.isHot) {
+                    Button(
+                        onClick = { vm.startSetup() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
+                        shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
+                    ) { Text("＋  CREATE A SPENDING WALLET", style = MaterialTheme.typography.titleMedium) }
+                }
             }
-        } else {
-            // Watch-only: a visible way to turn this into a spending wallet, not buried in settings.
-            Button(
-                onClick = { vm.startSetup() },
-                colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
-                shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
-            ) { Text("＋  CREATE A SPENDING WALLET", style = MaterialTheme.typography.titleMedium) }
         }
 
         ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
