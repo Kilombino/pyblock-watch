@@ -291,6 +291,7 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
     var coinControl by remember { mutableStateOf(false) }
     val selectedOutpoints = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var showScanner by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = LocalContext.current
     val cameraPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -299,7 +300,12 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
     if (showScanner) {
         QrScannerDialog(
             onResult = { raw ->
-                to = Regex("(bc1[a-zA-Z0-9]+|[13][a-km-zA-HJ-NP-Z1-9]{25,39})").find(raw)?.value ?: raw.trim()
+                var v = raw.trim()
+                // Accept a plain address or a BIP-21 URI (bitcoin:ADDR?amount=…), any case.
+                val scheme = v.indexOf(':')
+                if (scheme in 1..10 && v.substring(0, scheme).lowercase() == "bitcoin") v = v.substring(scheme + 1)
+                v = v.substringBefore("?").trim()
+                to = v
                 showScanner = false
             },
             onDismiss = { showScanner = false },
@@ -377,6 +383,15 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                         textStyle = MaterialTheme.typography.bodySmall, singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
+                    TextButton(onClick = {
+                        val pasted = clipboard.getText()?.text?.trim()
+                        if (!pasted.isNullOrBlank()) {
+                            var v = pasted
+                            val sc = v.indexOf(':')
+                            if (sc in 1..10 && v.substring(0, sc).lowercase() == "bitcoin") v = v.substring(sc + 1)
+                            to = v.substringBefore("?").trim()
+                        }
+                    }) { Text("PASTE", color = accent, style = MaterialTheme.typography.bodySmall) }
                     TextButton(onClick = {
                         if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) ==
                             android.content.pm.PackageManager.PERMISSION_GRANTED

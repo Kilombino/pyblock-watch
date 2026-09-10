@@ -95,7 +95,7 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                 },
             )
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
-                Text("cerrar", color = Color.White)
+                Text("close", color = Color.White)
             }
             Text(
                 "Point the camera at a QR",
