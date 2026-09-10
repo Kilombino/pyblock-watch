@@ -107,37 +107,46 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     }
 }
 
-/** Decodes one QR per frame from the Y (luminance) plane; fires [onFound] once. */
+/** Decodes one QR per frame. Robust to the rotation CameraX delivers (portrait phone,
+ *  landscape sensor buffer) by rotating the luminance itself — PlanarYUVLuminanceSource
+ *  cannot rotate, so relying on its rotateCounterClockwise() throws and no frame ever decodes. */
 private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.Analyzer {
-    private val reader = MultiFormatReader().apply {
-        // Spend the extra CPU: a dense xpub QR rarely decodes on the first, easy pass.
-        setHints(
-            mapOf(
-                DecodeHintType.TRY_HARDER to true,
-                DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
-            )
-        )
-    }
+    private val hints = mapOf(
+        DecodeHintType.TRY_HARDER to true,
+        DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+    )
     @Volatile private var done = false
 
     override fun analyze(image: ImageProxy) {
         if (done) { image.close(); return }
         try {
+            val w = image.width; val h = image.height
             val plane = image.planes[0]
-            val buffer = plane.buffer
-            val data = ByteArray(buffer.remaining()); buffer.get(data)
             val rowStride = plane.rowStride
-            val base = PlanarYUVLuminanceSource(
-                data, rowStride, image.height, 0, 0, image.width, image.height, false,
-            )
-            // Try the frame as-is, then rotated: a phone held in portrait feeds the analyzer
-            // a landscape buffer, and ZXing's locator is not fully rotation-invariant on a
-            // dense symbol. One extra attempt per frame costs little and rescues that case.
-            val text = decode(base) ?: decode(base.rotateCounterClockwise())
-            if (text != null) {
-                done = true
-                onFound(text)
+            val pixelStride = plane.pixelStride
+            val buf = plane.buffer
+            // Tightly pack the Y (luminance) plane into a w*h array, dropping any row padding.
+            val luma = ByteArray(w * h)
+            val rowBuf = ByteArray(rowStride)
+            var pos = 0
+            for (y in 0 until h) {
+                buf.position(y * rowStride)
+                val len = minOf(rowStride, buf.remaining())
+                buf.get(rowBuf, 0, len)
+                var x = 0; var i = 0
+                while (x < w) { luma[pos++] = rowBuf[i]; i += pixelStride; x++ }
             }
+
+            // Try every 90° orientation: the QR can be at any angle to the sensor buffer.
+            var curr = luma; var cw = w; var ch = h
+            var text: String? = null
+            for (r in 0 until 4) {
+                text = decode(curr, cw, ch)
+                if (text != null) break
+                val rotated = rotate90(curr, cw, ch)
+                curr = rotated; val t = cw; cw = ch; ch = t
+            }
+            if (text != null) { done = true; onFound(text) }
         } catch (_: Exception) {
             // no QR in this frame — keep looking
         } finally {
@@ -145,11 +154,24 @@ private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.
         }
     }
 
-    private fun decode(source: com.google.zxing.LuminanceSource): String? = try {
-        reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
-    } catch (_: Exception) {
-        null
-    } finally {
-        reader.reset()
+    /** Rotate a packed luminance buffer 90° clockwise: (w×h) → (h×w). */
+    private fun rotate90(src: ByteArray, w: Int, h: Int): ByteArray {
+        val out = ByteArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            out[x * h + (h - 1 - y)] = src[y * w + x]
+        }
+        return out
+    }
+
+    /** Decode a packed luminance buffer, trying both binarizers. */
+    private fun decode(luma: ByteArray, w: Int, h: Int): String? {
+        val source = PlanarYUVLuminanceSource(luma, w, h, 0, 0, w, h, false)
+        for (binarizer in listOf(HybridBinarizer(source), com.google.zxing.common.GlobalHistogramBinarizer(source))) {
+            try {
+                return MultiFormatReader().apply { setHints(hints) }
+                    .decodeWithState(BinaryBitmap(binarizer)).text
+            } catch (_: Exception) { /* try the next binarizer / orientation */ }
+        }
+        return null
     }
 }
