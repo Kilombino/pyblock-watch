@@ -485,7 +485,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Resolve a BIP-353 human-readable handle (`user@domain`, optionally ₿-prefixed) to a payment
-     * address. Reads the `user._bitcoin-payment.domain` TXT record over DNS-over-HTTPS (Cloudflare)
+     * address. Reads the `user.user._bitcoin-payment.domain` TXT record (BIP-353) over DNS-over-HTTPS (Cloudflare)
      * and returns the silent-payment address if the URI carries `sp=`, otherwise the on-chain
      * address. Throws with a readable message when there is no record.
      */
@@ -494,7 +494,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             val h = handle.trim().removePrefix("₿").removePrefix("₿")
             val at = h.indexOf('@')
             require(at > 0 && at < h.length - 1) { "Not a user@domain address." }
-            val name = "${h.substring(0, at)}._bitcoin-payment.${h.substring(at + 1)}"
+            val name = "${h.substring(0, at)}.user._bitcoin-payment.${h.substring(at + 1)}"
             val url = java.net.URL("https://cloudflare-dns.com/dns-query?name=$name&type=TXT")
             val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
                 setRequestProperty("Accept", "application/dns-json")
