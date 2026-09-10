@@ -38,6 +38,9 @@ data class SendDraft(
     val change: Long,
     val inputs: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>,
     val outputs: List<com.kilombino.pyblockwatch.crypto.TxBuilder.Output>,
+    // Set for a silent payment: the recipient's keys. Output 0's real scriptPubKey depends on
+    // the input private keys, so it is only computed at signing time and replaces the placeholder.
+    val silentRecipient: com.kilombino.pyblockwatch.crypto.SilentPayment.Recipient? = null,
 )
 
 /** Where the send flow is, so the UI can move from editing → review → broadcast → done. */
@@ -410,7 +413,16 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(sendPhase = SendPhase.Preparing) }
         viewModelScope.launch {
             runCatching {
-                val toScript = com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(toAddress)
+                // A human-readable handle (user@domain, BIP-353) resolves via DNS to the real
+                // address — which may itself be a silent payment.
+                val effectiveTo = if (toAddress.contains("@")) resolveBip353(toAddress) else toAddress
+                val isSilent = effectiveTo.trim().lowercase().startsWith("sp1")
+                val silentRecipient = if (isSilent)
+                    com.kilombino.pyblockwatch.crypto.SilentPayment.decodeAddress(effectiveTo) else null
+                // For a silent payment the true output depends on the input keys (computed at
+                // signing); a Taproot placeholder of the right size keeps fee/change correct.
+                val toScript = if (isSilent) byteArrayOf(0x51, 0x20) + ByteArray(32)
+                    else com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(effectiveTo)
                 require(amountSats > 0) { "Enter an amount." }
                 val rate = feeRatePerVb.coerceIn(0.1, 1000.0)
 
@@ -454,7 +466,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     fee = sum - amountSats // dust change folded into the fee
                     change = 0
                 }
-                val draft = SendDraft(toAddress, amountSats, fee, change, chosen, outputs)
+                val draft = SendDraft(toAddress, amountSats, fee, change, chosen, outputs, silentRecipient)
                 _state.update { it.copy(sendPhase = SendPhase.Review(draft)) }
             }.onFailure { e ->
                 _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the send.")) }
@@ -470,6 +482,45 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val fee = estimateFee(u.size, 1, feeRatePerVb.coerceIn(0.1, 1000.0))
         return (u.sumOf { it.value } - fee).coerceAtLeast(0)
     }
+
+    /**
+     * Resolve a BIP-353 human-readable handle (`user@domain`, optionally ₿-prefixed) to a payment
+     * address. Reads the `user._bitcoin-payment.domain` TXT record over DNS-over-HTTPS (Cloudflare)
+     * and returns the silent-payment address if the URI carries `sp=`, otherwise the on-chain
+     * address. Throws with a readable message when there is no record.
+     */
+    private suspend fun resolveBip353(handle: String): String =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val h = handle.trim().removePrefix("₿").removePrefix("₿")
+            val at = h.indexOf('@')
+            require(at > 0 && at < h.length - 1) { "Not a user@domain address." }
+            val name = "${h.substring(0, at)}._bitcoin-payment.${h.substring(at + 1)}"
+            val url = java.net.URL("https://cloudflare-dns.com/dns-query?name=$name&type=TXT")
+            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                setRequestProperty("Accept", "application/dns-json")
+                connectTimeout = 8000; readTimeout = 8000
+            }
+            val body = try {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Could not look up $h.")
+            } finally { conn.disconnect() }
+            val answers = org.json.JSONObject(body).optJSONArray("Answer")
+                ?: throw IllegalArgumentException("No payment record for $h.")
+            var uri: String? = null
+            for (i in 0 until answers.length()) {
+                val data = answers.getJSONObject(i).optString("data").trim().trim('"')
+                if (data.lowercase().startsWith("bitcoin:")) { uri = data; break }
+            }
+            val u = uri ?: throw IllegalArgumentException("No bitcoin: instruction for $h.")
+            val afterScheme = u.substring("bitcoin:".length)
+            val addressPart = afterScheme.substringBefore("?")
+            val sp = afterScheme.substringAfter("?", "").split("&")
+                .map { it.split("=", limit = 2) }
+                .firstOrNull { it.size == 2 && it[0].lowercase() == "sp" }?.get(1)
+            (sp ?: addressPart).takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("Empty payment instruction for $h.")
+        }
 
     /** The next unused receive index for the current chain — one past the highest used. */
     fun nextReceiveIndex(): Int {
@@ -510,7 +561,18 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             u.txid, u.vout, u.value, node.key, node.publicKey(),
                         )
                     }
-                    com.kilombino.pyblockwatch.crypto.TxBuilder.build(inputs, draft.outputs)
+                    // Silent payment: now that the input keys are known, compute the real Taproot
+                    // output and swap it in for the placeholder at index 0.
+                    val outputs = draft.silentRecipient?.let { sp ->
+                        val spInputs = inputs.map {
+                            com.kilombino.pyblockwatch.crypto.SilentPayment.Input(it.privateKey, it.txid, it.vout)
+                        }
+                        val spScript = com.kilombino.pyblockwatch.crypto.SilentPayment.outputScript(sp, spInputs, 0)
+                        draft.outputs.mapIndexed { i, o ->
+                            if (i == 0) com.kilombino.pyblockwatch.crypto.TxBuilder.Output(spScript, o.value) else o
+                        }
+                    } ?: draft.outputs
+                    com.kilombino.pyblockwatch.crypto.TxBuilder.build(inputs, outputs)
                 }
                 val endpoint = store.endpoint(chain)
                 val pin = store.pinnedFingerprint(endpoint)

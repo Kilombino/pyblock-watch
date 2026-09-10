@@ -72,6 +72,29 @@ object Bech32 {
         return sb.toString()
     }
 
+    /**
+     * Decode a Silent Payment (BIP-352) address `sp1…`: returns the 66-byte payload
+     * (B_scan ‖ B_spend) after verifying the Bech32m checksum, or null if malformed. Unlike a
+     * SegWit address this has no 2–40 byte program limit, so it needs its own decode.
+     */
+    fun decodeSilentPayment(addr: String): ByteArray? {
+        if (addr != addr.lowercase() && addr != addr.uppercase()) return null
+        val a = addr.lowercase()
+        val pos = a.lastIndexOf('1')
+        if (pos < 1 || pos + 7 > a.length || a.substring(0, pos) != "sp") return null
+        val dp = a.substring(pos + 1)
+        val values = IntArray(dp.length)
+        for (i in dp.indices) {
+            val idx = CHARSET.indexOf(dp[i]); if (idx < 0) return null; values[i] = idx
+        }
+        if (values.size < 7) return null
+        if (polymod(hrpExpand("sp") + values) != BECH32M_CONST) return null
+        val data = values.copyOfRange(0, values.size - 6) // drop the 6 checksum symbols
+        // data[0] is the version; the rest is the 5-bit-grouped payload.
+        val prog = convertBits(data.copyOfRange(1, data.size), 5, 8, false) ?: return null
+        return ByteArray(prog.size) { prog[it].toByte() }
+    }
+
     data class Segwit(val witnessVersion: Int, val program: ByteArray)
 
     /**

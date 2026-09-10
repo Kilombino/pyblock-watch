@@ -339,6 +339,10 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
             is SendPhase.Review -> {
                 val d = phase.draft
                 RowLine("To", shortAddress(d.toAddress), accent)
+                if (d.silentRecipient != null) {
+                    Text("→ silent payment (BIP-352)", color = Good,
+                         style = MaterialTheme.typography.bodySmall)
+                }
                 RowLine("Amount", "${groupSats(d.amount)} sats", accent)
                 RowLine("Fee", "${groupSats(d.fee)} sats", accent)
                 RowLine("Change", if (d.change > 0) "${groupSats(d.change)} sats" else "—", accent)
@@ -398,6 +402,8 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                         ) showScanner = true else cameraPermission.launch(android.Manifest.permission.CAMERA)
                     }) { Text("📷", color = accent, style = MaterialTheme.typography.titleMedium) }
                 }
+                Text("address · sp1… (silent payment) · user@domain",
+                     style = MaterialTheme.typography.bodySmall, color = TextFaint)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
