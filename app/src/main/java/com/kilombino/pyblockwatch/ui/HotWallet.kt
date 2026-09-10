@@ -1,5 +1,7 @@
 package com.kilombino.pyblockwatch.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +27,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.kilombino.pyblockwatch.crypto.Bip39
 import java.security.SecureRandom
@@ -286,6 +290,21 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
     var feeRate by remember { mutableStateOf("2") }
     var coinControl by remember { mutableStateOf(false) }
     val selectedOutpoints = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var showScanner by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) showScanner = true }
+    LaunchedEffect(Unit) { vm.loadUtxos() }
+    if (showScanner) {
+        QrScannerDialog(
+            onResult = { raw ->
+                to = Regex("(bc1[a-zA-Z0-9]+|[13][a-km-zA-HJ-NP-Z1-9]{25,39})").find(raw)?.value ?: raw.trim()
+                showScanner = false
+            },
+            onDismiss = { showScanner = false },
+        )
+    }
 
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -351,12 +370,19 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                          style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(6.dp))
                 }
-                OutlinedTextField(
-                    value = to, onValueChange = { to = it },
-                    label = { Text("recipient address", style = MaterialTheme.typography.bodySmall) },
-                    textStyle = MaterialTheme.typography.bodySmall, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = to, onValueChange = { to = it },
+                        label = { Text("recipient address", style = MaterialTheme.typography.bodySmall) },
+                        textStyle = MaterialTheme.typography.bodySmall, singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) ==
+                            android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) showScanner = true else cameraPermission.launch(android.Manifest.permission.CAMERA)
+                    }) { Text("📷", color = accent, style = MaterialTheme.typography.titleMedium) }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -373,7 +399,17 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Text("fee 0.1–1000 sat/vB", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("fee 0.1–1000 sat/vB · MAX sends everything minus fee",
+                         style = MaterialTheme.typography.bodySmall, color = TextFaint,
+                         modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        val sel = if (coinControl) {
+                            (state.utxos ?: emptyList()).filter { "${it.txid}:${it.vout}" in selectedOutpoints }
+                        } else emptyList()
+                        amount = vm.maxSendable(feeRate.toDoubleOrNull() ?: 1.0, sel).toString()
+                    }) { Text("MAX", color = accent, style = MaterialTheme.typography.bodyMedium) }
+                }
 
                 // Coin control: pick exactly which UTXOs to spend, or leave off for auto-select.
                 Spacer(Modifier.height(8.dp))

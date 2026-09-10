@@ -98,7 +98,7 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                 Text("cerrar", color = Color.White)
             }
             Text(
-                "Apunta al QR de tu xpub",
+                "Point the camera at a QR",
                 color = Color.White,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(40.dp),

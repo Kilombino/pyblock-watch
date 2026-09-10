@@ -162,14 +162,31 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 val endpoint = store.endpoint(chain)
                 val pin = store.pinnedFingerprint(endpoint)
-                val (rows, txs, tip) = scanner.refreshDetails(cs.rows, endpoint, pin)
+                // A SILENT gap-walk (no "scanning" flicker): unlike a plain balance refresh it
+                // re-derives the branches, so a payment to a freshly handed-out receive address,
+                // and the change address a spend just created, are DISCOVERED while the app is
+                // open — the reason a restart used to be needed. Confirmations refresh too.
+                var doneRows: List<AddressRow>? = null
+                var doneTxs: List<TxConf> = emptyList()
+                var tip = cs.height
+                scanner.scan(xpub, chain, endpoint, pin, store.scriptType, store.gapLimit).collect { ev ->
+                    when (ev) {
+                        is ScanEvent.Connected ->
+                            if (pin == null && ev.fingerprint != null) store.pinFingerprint(endpoint, ev.fingerprint)
+                        is ScanEvent.Done -> { doneRows = ev.rows; doneTxs = ev.txs; tip = ev.height }
+                        else -> {}
+                    }
+                }
+                val rows = doneRows ?: return@runCatching
                 val conf = rows.sumOf { it.confirmed }
                 val unconf = rows.sumOf { it.unconfirmed }
                 store.setLastBalance(chain, conf, unconf)
                 if (store.notificationsEnabled) {
-                    BalanceWatch.evaluate(store, notifier, chain, conf, unconf, txs)
+                    BalanceWatch.evaluate(store, notifier, chain, conf, unconf, doneTxs)
                 }
-                update(chain) { it.copy(rows = rows, transactions = txs, height = tip) }
+                update(chain) {
+                    it.copy(rows = rows, transactions = doneTxs, height = tip, phase = ScanPhase.Complete)
+                }
             }
         }
     }
@@ -443,6 +460,15 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the send.")) }
             }
         }
+    }
+
+    /** The most a sweep can send from [selected] (or all loaded UTXOs): their value minus a
+     *  one-output fee. Used by the MAX button; 0 if the UTXOs aren't loaded yet. */
+    fun maxSendable(feeRatePerVb: Double, selected: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>): Long {
+        val u = if (selected.isNotEmpty()) selected else _state.value.utxos ?: emptyList()
+        if (u.isEmpty()) return 0
+        val fee = estimateFee(u.size, 1, feeRatePerVb.coerceIn(0.1, 1000.0))
+        return (u.sumOf { it.value } - fee).coerceAtLeast(0)
     }
 
     /** The next unused receive index for the current chain — one past the highest used. */

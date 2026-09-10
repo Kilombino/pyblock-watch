@@ -22,10 +22,10 @@ class Notifier(private val context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val m = manager()
         m.createNotificationChannel(
-            NotificationChannel(CHANNEL_ONGOING, "Vigilancia", NotificationManager.IMPORTANCE_MIN)
+            NotificationChannel(CHANNEL_ONGOING, "Watching", NotificationManager.IMPORTANCE_MIN)
         )
         m.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALERTS, "Cambios de saldo", NotificationManager.IMPORTANCE_HIGH)
+            NotificationChannel(CHANNEL_ALERTS, "Balance changes", NotificationManager.IMPORTANCE_HIGH)
         )
     }
 
