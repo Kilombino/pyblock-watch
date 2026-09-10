@@ -32,7 +32,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
-import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import java.util.concurrent.Executors
 
@@ -81,8 +81,13 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                         analysis.setAnalyzer(executor, QrAnalyzer { text ->
-                            provider.unbindAll()
-                            onResult(text)
+                            // CameraX must be touched on the main thread; doing unbind + the
+                            // callback here (not on the analyzer's worker thread) is what makes
+                            // the dialog actually close and hand the result back.
+                            ContextCompat.getMainExecutor(ctx).execute {
+                                runCatching { provider.unbindAll() }
+                                onResult(text)
+                            }
                         })
                         provider.unbindAll()
                         runCatching {
@@ -107,9 +112,9 @@ fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     }
 }
 
-/** Decodes one QR per frame. Robust to the rotation CameraX delivers (portrait phone,
- *  landscape sensor buffer) by rotating the luminance itself — PlanarYUVLuminanceSource
- *  cannot rotate, so relying on its rotateCounterClockwise() throws and no frame ever decodes. */
+/** Decodes one QR per frame. Uses ImageProxy.toBitmap() so the YUV→RGB conversion is the
+ *  platform's (correct on every device), rotates by the reported sensor rotation so the QR is
+ *  upright, and reads with ZXing over an RGB luminance source. */
 private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.Analyzer {
     private val hints = mapOf(
         DecodeHintType.TRY_HARDER to true,
@@ -120,32 +125,13 @@ private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.
     override fun analyze(image: ImageProxy) {
         if (done) { image.close(); return }
         try {
-            val w = image.width; val h = image.height
-            val plane = image.planes[0]
-            val rowStride = plane.rowStride
-            val pixelStride = plane.pixelStride
-            val buf = plane.buffer
-            // Tightly pack the Y (luminance) plane into a w*h array, dropping any row padding.
-            val luma = ByteArray(w * h)
-            val rowBuf = ByteArray(rowStride)
-            var pos = 0
-            for (y in 0 until h) {
-                buf.position(y * rowStride)
-                val len = minOf(rowStride, buf.remaining())
-                buf.get(rowBuf, 0, len)
-                var x = 0; var i = 0
-                while (x < w) { luma[pos++] = rowBuf[i]; i += pixelStride; x++ }
-            }
-
-            // Try every 90° orientation: the QR can be at any angle to the sensor buffer.
-            var curr = luma; var cw = w; var ch = h
-            var text: String? = null
-            for (r in 0 until 4) {
-                text = decode(curr, cw, ch)
-                if (text != null) break
-                val rotated = rotate90(curr, cw, ch)
-                curr = rotated; val t = cw; cw = ch; ch = t
-            }
+            val raw = image.toBitmap()
+            val rot = image.imageInfo.rotationDegrees
+            val upright = if (rot != 0) {
+                val m = android.graphics.Matrix().apply { postRotate(rot.toFloat()) }
+                android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
+            } else raw
+            val text = decode(upright) ?: decode(raw)
             if (text != null) { done = true; onFound(text) }
         } catch (_: Exception) {
             // no QR in this frame — keep looking
@@ -154,23 +140,21 @@ private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.
         }
     }
 
-    /** Rotate a packed luminance buffer 90° clockwise: (w×h) → (h×w). */
-    private fun rotate90(src: ByteArray, w: Int, h: Int): ByteArray {
-        val out = ByteArray(w * h)
-        for (y in 0 until h) for (x in 0 until w) {
-            out[x * h + (h - 1 - y)] = src[y * w + x]
-        }
-        return out
-    }
-
-    /** Decode a packed luminance buffer, trying both binarizers. */
-    private fun decode(luma: ByteArray, w: Int, h: Int): String? {
-        val source = PlanarYUVLuminanceSource(luma, w, h, 0, 0, w, h, false)
-        for (binarizer in listOf(HybridBinarizer(source), com.google.zxing.common.GlobalHistogramBinarizer(source))) {
+    private fun decode(bmp: android.graphics.Bitmap): String? {
+        val w = bmp.width; val h = bmp.height
+        val pixels = IntArray(w * h)
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        val source = RGBLuminanceSource(w, h, pixels)
+        val candidates = listOf(
+            HybridBinarizer(source),
+            com.google.zxing.common.GlobalHistogramBinarizer(source),
+            HybridBinarizer(source.invert()),
+        )
+        for (binarizer in candidates) {
             try {
                 return MultiFormatReader().apply { setHints(hints) }
                     .decodeWithState(BinaryBitmap(binarizer)).text
-            } catch (_: Exception) { /* try the next binarizer / orientation */ }
+            } catch (_: Exception) { /* try next */ }
         }
         return null
     }
