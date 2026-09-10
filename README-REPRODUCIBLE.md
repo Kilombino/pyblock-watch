@@ -56,14 +56,14 @@ A keystore is only needed to *sign*. The unsigned APK is what you compare.
 
 ## 5. Verified result
 
-Version **0.7.4** (versionCode 11):
+Version **0.7.5** (versionCode 12):
 
 ```
 app-release-unsigned.apk
-SHA-256  941662c367b3e1cd107a7162b97b33c5dc2d5a3cca019f9f8a2a25009bff5c6d
+SHA-256  7c30055f7f658f8856e668d080cce9a39a62e1ffc27dc389a70fea979cc20544
 ```
 
-(0.7.3 was `a994513b7f1f46812d1c4475128f562accb8e550dddb9bc09a1c4099a2087f27`; 0.7.2 was `c0ebcfe958227069797c4d530ceab54fd92e6321c58b9a541c454a5aaba8bf00`; 0.7.1 was `416179406557aa482c95abf6e646bc63f27445741423afdb409649b7f72b5103`; 0.7.0 was `f4651247543d54680210daeae9a8b1f4be7dc57c0b1b49bbb5aae64d376e45a3`; 0.6.0 was `06725332267d8feb1413054d50057ad4337258ca8b3213fade88f4498f716d6f`; 0.5.0 was `5237b543ecd605f7884abb415b811c2753e01a1cf6c101c0b85b8fe172835eac`; 0.4.0 was `4a10be008fbce652bb7a9f596fae48b8b201a5aa3e4182a794454a2f007c53f3`; 0.3.0 was `1459eee0e7b61c7161a37d682310b5c766fef2b45cc9084e957654e28fa1d8b4`; 0.2.0 was `e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c`; 0.1.0 was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
+(0.7.4 was `941662c367b3e1cd107a7162b97b33c5dc2d5a3cca019f9f8a2a25009bff5c6d`; 0.7.3 was `a994513b7f1f46812d1c4475128f562accb8e550dddb9bc09a1c4099a2087f27`; 0.7.2 was `c0ebcfe958227069797c4d530ceab54fd92e6321c58b9a541c454a5aaba8bf00`; 0.7.1 was `416179406557aa482c95abf6e646bc63f27445741423afdb409649b7f72b5103`; 0.7.0 was `f4651247543d54680210daeae9a8b1f4be7dc57c0b1b49bbb5aae64d376e45a3`; 0.6.0 was `06725332267d8feb1413054d50057ad4337258ca8b3213fade88f4498f716d6f`; 0.5.0 was `5237b543ecd605f7884abb415b811c2753e01a1cf6c101c0b85b8fe172835eac`; 0.4.0 was `4a10be008fbce652bb7a9f596fae48b8b201a5aa3e4182a794454a2f007c53f3`; 0.3.0 was `1459eee0e7b61c7161a37d682310b5c766fef2b45cc9084e957654e28fa1d8b4`; 0.2.0 was `e668221b0eb97ffb38d039580427f63b10d01dc187f69b573d48bbda5247af8c`; 0.1.0 was `9c97676adc3625399c222e5958074a4303e12420e79fe01316ec5ff9b3a86b0f`.)
 
 Verified three ways, all producing that identical hash:
 
@@ -115,13 +115,13 @@ what every future version must keep:
 b8d7ad679fbfbe39f5640bce01d675347f52b27b7ae6f3731d2ad982c92ef135
 ```
 
-The signed v0.7.4 APK you download has SHA-256
-`2439c516d65131a1e32d22e8c95920d8029d4c7d82d9319a92686cec95df4a2f`; the reproducible
-unsigned build (§5) is `941662c3…`, and `apksigcopier` (§6) confirms the signed APK is
+The signed v0.7.5 APK you download has SHA-256
+`f013aa9c7c91d2982bc9e388789e94c507d4b1ac4ae410e6c86e929982be8fb6`; the reproducible
+unsigned build (§5) is `7c30055f…`, and `apksigcopier` (§6) confirms the signed APK is
 exactly that build plus this signature. It is signed with `--alignment-preserved`, so the
 signed file is the unsigned build plus only a signature block — no re-zipping — which is
 what lets a verifier's `apksigcopier copy` reproduce it byte for byte. The certificate is
 unchanged from 0.1.0 — the v3 lineage means the key is the same across versions.
 Distributed via
-[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.7.4) and
+[GitHub Releases](https://github.com/Kilombino/pyblock-watch/releases/tag/v0.7.5) and
 Zapstore.
